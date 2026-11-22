@@ -10,8 +10,11 @@
       km.bindCompass($("tripCompass"), () => K.compass.start());
       km.labelStyle($("tripStyleBtn"));
       $("tripStyleBtn").onclick = () => km.nextStyle($("tripStyleBtn"));
+      km.setTransit(km.transitOn(), $("tripTransitBtn"));
+      $("tripTransitBtn").onclick = () => km.setTransit(!km.transitOn(), $("tripTransitBtn"));
+      km.onStation((st) => km.popup(st.lngLat, `<div class="k-pop"><div class="k-pop-addr">${K.esc(st.line)} · ${K.esc(st.name)}</div>${st.line === "EDSA Carousel" ? `<div class="small text-muted">${K.esc(K.t("ta.carouselTip"))}</div>` : ""}</div>`));
     } else {
-      ["tripCompass", "tripStyleBtn", "btnMyLoc"].forEach((id) => $(id).classList.add("d-none"));
+      ["tripCompass", "tripStyleBtn", "btnMyLoc", "tripTransitBtn"].forEach((id) => $(id).classList.add("d-none"));
     }
     $("btnBack").onclick = () => { location.hash = "#plan"; };
     $("btnSwap").onclick = swap;
@@ -49,6 +52,8 @@
     K.dirCompass.mount($("dirCompass"), km);
     render();
     K.fareEstimate.update($("resultsFare"));
+    K.buses.render($("busesBox"));
+    K.feedback.reset();
     setTimeout(() => {
       if (km) km.resize();
       K.routeView.show(km);
@@ -59,6 +64,7 @@
     const ai = S.ai, body = $("planBody"), sources = $("planSources");
     sources.innerHTML = "";
     $("planTools").classList.add("d-none");
+    $("fbRate").classList.add("d-none");
     if (ai.loading) {
       $("groundNote").textContent = "";
       body.innerHTML = `<div class="k-loading">
@@ -84,6 +90,7 @@
       `<div class="k-plan">${K.planView.render(ai)}</div>`;
     if (otherLang) $("btnRelang").onclick = () => K.app.requestPlan();
     $("planTools").classList.remove("d-none");
+    $("fbRate").classList.remove("d-none");
     $("btnAgain").onclick = () => K.app.requestPlan();
     $("btnSharePlan").onclick = async () => {
       const text = K.planView.shareText(ai, S);
@@ -106,6 +113,7 @@
     render();
     K.dirCompass.mount($("dirCompass"), km);
     K.fareEstimate.update($("resultsFare"));
+    K.buses.render($("busesBox"));
     K.routeView.setMode(K.routeView.mode());
     if (km) km.labelStyle($("tripStyleBtn"));
   }

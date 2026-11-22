@@ -12,13 +12,16 @@
       km.bindCompass($("planCompass"));
       km.labelStyle($("planStyleBtn"));
       $("planStyleBtn").onclick = () => km.nextStyle($("planStyleBtn"));
-      km.map.on("click", onMapTap);
+      km.onTap(onMapTap);
+      km.onStation(onStationTap);
+      km.setTransit(km.transitOn(), $("planTransitBtn"));
+      $("planTransitBtn").onclick = () => km.setTransit(!km.transitOn(), $("planTransitBtn"));
       km.map.on("moveend", K.debounce(previewPin, 700));
       km.onPinDrag(onPinDrag);
       km.ready(syncMarkers);
       $("planExpandBtn").onclick = () => setExpanded(!document.body.classList.contains("k-mapfull"));
     } else {
-      ["btnPin", "btnPinStart", "planStyleBtn", "planCompass", "planExpandBtn"].forEach((id) => $(id) && $(id).classList.add("d-none"));
+      ["btnPin", "btnPinStart", "planStyleBtn", "planCompass", "planExpandBtn", "planTransitBtn"].forEach((id) => $(id) && $(id).classList.add("d-none"));
     }
     // Search as you type
     taOrigin = K.typeahead.attach($("origin"), $("originSuggestions"), { onPick: (it) => pickSuggestion("origin", it) });
@@ -152,6 +155,21 @@
     found = await K.api.reverseGeocode(p.latitude, p.longitude);
     const addr = el.querySelector(".k-pop-addr");
     if (addr) addr.textContent = found.inArea === false ? K.t("pin.outside") : K.fmt.shortLabel(found.label);
+  }
+
+  // Tapping a station on the map: name + Start here / Go here
+  function onStationTap(st) {
+    if (pinTarget) { km.map.easeTo({ center: st.lngLat, duration: 400 }); return; }
+    const bus = st.line === "EDSA Carousel";
+    const text = `${st.name} ${bus ? "EDSA Carousel stop" : st.line + " station"}`;
+    const el = km.popup(st.lngLat, `<div class="k-pop"><div class="k-pop-addr"><i class="bi ${bus ? "bi-bus-front-fill" : "bi-train-front-fill"}" style="color:${K.esc(st.color)}"></i> ${K.esc(text)}</div>
+      ${bus ? `<div class="small text-muted mb-2">${K.esc(K.t("ta.carouselTip"))}</div>` : ""}
+      <div class="k-pop-btns"><button type="button" class="btn btn-sm btn-outline-primary" data-t="origin"><span class="k-dotmini a"></span> ${K.esc(K.t("pop.start"))}</button>
+      <button type="button" class="btn btn-sm btn-primary" data-t="destination"><span class="k-dotmini b"></span> ${K.esc(K.t("pop.go"))}</button></div></div>`);
+    el.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => {
+      km.closePopup();
+      setPoint(b.dataset.t, { latitude: st.lngLat.lat, longitude: st.lngLat.lng, label: text + ", Quezon City" }, text + ", Quezon City");
+    });
   }
 
   // Dragging the A or B pin moves that point to the exact spot.

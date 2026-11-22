@@ -21,6 +21,19 @@
     </div>`;
   }
 
+  function busCard() {
+    const t = K.data().transit;
+    const carousel = t.stations.filter((s) => s.line === "EDSA Carousel").map((s) => s.name).join(" · ");
+    return `<div class="k-card mb-3">
+      <h2 class="h5"><i class="bi bi-bus-front"></i> ${K.esc(K.t("fares.cityBuses"))}</h2>
+      <p class="small text-muted">${K.esc(K.t("fares.cityBusesSub"))}</p>
+      <div class="k-bus carousel"><span class="k-bus-no">1</span><div><div class="fw-semibold">EDSA Carousel</div>
+        <div class="small text-muted">${K.esc(K.t("fares.carouselStops"))} ${K.esc(carousel)}</div></div></div>
+      ${t.busRoutes.filter((r) => !r.carousel).map((r) => `<div class="k-bus"><span class="k-bus-no">${K.esc(r.no)}</span>
+        <div><div class="fw-semibold">${K.esc(r.name)}</div><div class="small text-muted">${K.esc(K.t("bus.via", { v: r.via }))}</div></div></div>`).join("")}
+    </div>`;
+  }
+
   function mrt3Card(f) {
     const m = f.mrt3, fare = {};
     m.pairs.forEach(([a, b, v]) => { fare[a + "-" + b] = v; fare[b + "-" + a] = v; });
@@ -64,7 +77,7 @@
   function init() {
     const f = K.data().fares;
     document.getElementById("fareList").innerHTML =
-      `<div class="row g-3"><div class="col-lg-6">${roadCard(f)}${qcBusCard()}</div><div class="col-lg-6">${mrt3Card(f)}${lrtCard(f)}${discountCard(f)}</div></div>` +
+      `<div class="row g-3"><div class="col-lg-6">${roadCard(f)}${qcBusCard()}${busCard()}</div><div class="col-lg-6">${mrt3Card(f)}${lrtCard(f)}${discountCard(f)}</div></div>` +
       `<div class="alert k-warn small" role="note">${K.esc(K.t("fares.warn", { d: K.L(f.lastChecked) }))}</div>`;
   }
 

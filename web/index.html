@@ -119,6 +119,7 @@
         <div class="k-mapbtns">
           <button id="planCompass" type="button" class="k-fab-sm k-compass" data-i18n-aria="map.compass" aria-label="Compass: tap to face north"><span class="k-needle"></span></button>
           <button id="planStyleBtn" type="button" class="k-fab-sm"><i class="bi bi-layers-fill"></i></button>
+          <button id="planTransitBtn" type="button" class="k-fab-sm" aria-pressed="false" data-i18n-aria="map.transit" aria-label="Show train and EDSA Carousel stations"><i class="bi bi-bus-front-fill"></i></button>
           <button id="planExpandBtn" type="button" class="k-fab-sm" data-i18n-aria="map.expand" aria-label="Full-screen map"><i class="bi bi-arrows-fullscreen"></i></button>
         </div>
         <div id="pinBar" class="k-pinbar d-none" role="dialog" aria-live="polite">
@@ -151,6 +152,7 @@
       <div class="k-mapbtns k-mapbtns-trip">
         <button id="tripCompass" type="button" class="k-fab-sm k-compass" data-i18n-aria="map.compass" aria-label="Compass"><span class="k-needle"></span></button>
         <button id="tripStyleBtn" type="button" class="k-fab-sm"><i class="bi bi-layers-fill"></i></button>
+        <button id="tripTransitBtn" type="button" class="k-fab-sm" aria-pressed="false" data-i18n-aria="map.transit" aria-label="Show train and EDSA Carousel stations"><i class="bi bi-bus-front-fill"></i></button>
       </div>
       <button id="btnMyLoc" class="k-fab" type="button" data-i18n-aria="res.myLoc" aria-label="Show my location"><i class="bi bi-crosshair"></i></button>
     </div>
@@ -172,12 +174,19 @@
           <button id="btnAgain" class="btn btn-outline-primary rounded-pill" type="button"><i class="bi bi-arrow-repeat"></i> <span data-i18n="res.again">Make another plan</span></button>
           <a id="lnkTransit" class="btn btn-outline-primary rounded-pill" target="_blank" rel="noopener noreferrer"><i class="bi bi-google"></i> <span data-i18n="res.transitGoogle">Transit in Google Maps</span></a>
         </div>
+        <div id="fbRate" class="k-fbrate d-none">
+          <span id="fbRateText" data-i18n="fb.helpful">Was this plan helpful?</span>
+          <button type="button" class="btn btn-sm btn-outline-success rounded-pill" data-fb-quick="up" data-i18n-aria="fb.yes" aria-label="Yes"><i class="bi bi-hand-thumbs-up-fill"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-danger rounded-pill" data-fb-quick="down" data-i18n-aria="fb.no" aria-label="No"><i class="bi bi-hand-thumbs-down-fill"></i></button>
+        </div>
         <div id="planSources" class="mt-3"></div>
+        <div id="busesBox" class="mt-3"></div>
         <div id="resultsFare" class="mt-3"></div>
         <div class="k-card mt-3"><h2 class="h5"><i class="bi bi-check2-square"></i> <span data-i18n="ride.title">Before you ride</span></h2>
           <ul class="k-check mb-0"><li data-i18n="ride.c1">Check the vehicle’s route sign matches your plan.</li><li data-i18n="ride.c2">Ask the driver or conductor for the current fare.</li>
           <li data-i18n="ride.c3">Carry small bills or coins.</li><li data-i18n="ride.c4">Tell someone your route if the trip is new to you.</li></ul></div>
         <div class="alert k-warn small mt-3" role="note" data-i18n="res.aiWarn">This guide is AI-made. Routes, fares, and schedules may have changed. Always verify locally.</div>
+        <button type="button" class="btn btn-link p-0 small" data-fb-open="plan"><i class="bi bi-chat-square-text"></i> <span data-i18n="fb.report">Something wrong with this route? Tell us</span></button>
       </div>
     </div>
   </div>
@@ -194,6 +203,11 @@
   <h1 class="k-title h2" data-i18n="guide.title">Commuter guide</h1>
   <p class="text-muted" data-i18n="guide.sub">Tap a topic to open it. Start with “How to use Komute”.</p>
   <div id="guideList" class="accordion k-guide"></div>
+  <div class="k-card k-fbcard mt-3">
+    <div><strong data-i18n="fb.cardTitle">Help us improve Komute</strong>
+      <div class="small text-muted" data-i18n="fb.cardSub">Wrong route? Missing place? Idea? Send feedback. It takes 30 seconds.</div></div>
+    <button type="button" class="btn btn-primary rounded-pill" data-fb-open="idea"><i class="bi bi-chat-heart"></i> <span data-i18n="fb.send">Send feedback</span></button>
+  </div>
 </section>
 
 <section id="view-fares" class="d-none">
@@ -243,6 +257,32 @@
   </div>
 </div>
 
+<!-- Feedback -->
+<div class="modal fade" id="fbModal" tabindex="-1" aria-labelledby="fbTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h5" id="fbTitle" data-i18n="fb.title">Send feedback</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria="common.close" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <div class="small text-muted mb-2" id="fbTrip"></div>
+        <div class="d-flex gap-2 mb-3" role="group">
+          <button type="button" class="btn btn-outline-success rounded-pill flex-fill" data-fb-rate="up" aria-pressed="false"><i class="bi bi-hand-thumbs-up-fill"></i> <span data-i18n="fb.good">Helpful</span></button>
+          <button type="button" class="btn btn-outline-danger rounded-pill flex-fill" data-fb-rate="down" aria-pressed="false"><i class="bi bi-hand-thumbs-down-fill"></i> <span data-i18n="fb.bad">Not helpful</span></button>
+        </div>
+        <label class="form-label fw-semibold" for="fbCategory" data-i18n="fb.about">About</label>
+        <select id="fbCategory" class="form-select mb-3"></select>
+        <label class="form-label fw-semibold" for="fbMessage" data-i18n="fb.message">Your message</label>
+        <textarea id="fbMessage" class="form-control mb-3" rows="4" maxlength="1000" data-i18n-ph="fb.messagePh" placeholder="Example: The jeep from Philcoa to SM North says “SM NORTH – PHILCOA”, not “MUÑOZ”."></textarea>
+        <label class="form-label fw-semibold" for="fbContact"><span data-i18n="fb.contact">Email or name</span> <span class="text-muted fw-normal" data-i18n="fb.optional">(optional)</span></label>
+        <input id="fbContact" class="form-control" maxlength="120" autocomplete="email">
+        <div id="fbStatus" class="small mt-2" role="status" aria-live="polite"></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="pin.cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="fbSend"><i class="bi bi-send-fill"></i> <span data-i18n="fb.send">Send feedback</span></button></div>
+    </div>
+  </div>
+</div>
+
 <!-- Save a place -->
 <div class="modal fade" id="saveModal" tabindex="-1" aria-labelledby="saveTitle" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -272,6 +312,7 @@
 <script src="js/data/transit.js"></script>
 <script src="js/data/guide.js"></script>
 <script src="js/data/barangays.js"></script>
+<script src="js/data/schools.js"></script>
 <script src="js/lib/plan-cards.js"></script>
 <script src="js/lib/plan-view.js"></script>
 <script src="js/lib/api.js"></script>
@@ -283,6 +324,8 @@
 <script src="js/lib/route.js"></script>
 <script src="js/lib/navigate.js"></script>
 <script src="js/lib/dircompass.js"></script>
+<script src="js/lib/buses.js"></script>
+<script src="js/lib/feedback.js"></script>
 <script src="js/views/home.js"></script>
 <script src="js/views/results.js"></script>
 <script src="js/views/saved.js"></script>

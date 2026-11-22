@@ -51,7 +51,7 @@
   function setLanguage(lang) {
     K.setLang(lang);
     document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === K.lang)));
-    K.guide.relabel(); K.fares.relabel(); K.saved.init(); K.home.relabel(); K.results.relabel();
+    K.guide.relabel(); K.fares.relabel(); K.saved.init(); K.home.relabel(); K.results.relabel(); K.feedback.relabel();
   }
 
   K.app = { findRoutes, requestPlan, currentView };
@@ -66,7 +66,7 @@
     if (K.store.get("welcomeHidden", false)) box.classList.add("d-none");
     document.getElementById("btnWelcomeClose").onclick = () => { box.classList.add("d-none"); K.store.set("welcomeHidden", true); };
 
-    K.home.init(); K.results.init(); K.saved.init(); K.guide.init(); K.fares.init(); K.navigate.init();
+    K.home.init(); K.results.init(); K.saved.init(); K.guide.init(); K.fares.init(); K.navigate.init(); K.feedback.init();
     window.addEventListener("hashchange", route);
     route();
   });

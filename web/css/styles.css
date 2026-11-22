@@ -350,3 +350,18 @@ body.k-mapfull .k-pinbar { bottom: calc(1rem + env(safe-area-inset-bottom)); }
 body.k-typing { padding-bottom: 70vh; }
 body.k-typing .k-findbar { position: static !important; box-shadow: none !important; }
 @media (max-width: 767.98px) { body.k-typing .k-tabbar { display: none; } }
+
+/* ---- Buses, stations, feedback ---- */
+.k-fab-sm[aria-pressed="true"] { background: #dc2626; color: #fff; }
+.k-buses { border-color: #c7d7fb; }
+.k-bus { display: flex; gap: .75rem; align-items: flex-start; padding: .55rem 0; border-bottom: 1px solid #eef2f0; }
+.k-bus:last-of-type { border-bottom: 0; }
+.k-bus-no { min-width: 2.6rem; height: 2.1rem; padding: 0 .4rem; border-radius: 8px; background: #1d4ed8; color: #fff; font-weight: 800; display: grid; place-items: center; flex: none; }
+.k-bus.carousel .k-bus-no { background: #dc2626; }
+.k-bus.qcity .k-bus-no { background: #15803d; }
+.k-bus-dist { color: #1d4ed8; }
+.k-fbrate { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; padding: .6rem .9rem; background: #f3f7f5; border: 1px solid var(--k-outline); border-radius: 14px; font-weight: 600; }
+.k-fbrate span { flex: 1 1 auto; }
+.k-fbcard { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; background: var(--k-mint); border-color: #b7ded1; }
+[data-fb-rate][aria-pressed="true"].btn-outline-success { background: #198754; color: #fff; }
+[data-fb-rate][aria-pressed="true"].btn-outline-danger { background: #dc3545; color: #fff; }

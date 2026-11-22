@@ -16,7 +16,7 @@ window.KOMUTE_DATA.fares = {
     { icon: "bi-bus-front-fill", mode: { en: "City bus (aircon)", tl: "City bus (aircon)" },
       fare: { en: "₱18 for the first 5 km, then +₱2.98 per km", tl: "₱18 sa unang 5 km, tapos +₱2.98 kada km" } },
     { icon: "bi-signpost-split", mode: { en: "EDSA Carousel (busway)", tl: "EDSA Carousel (busway)" },
-      fare: { en: "Priced station to station, about ₱18 minimum. Cash or Beep card.", tl: "Depende sa istasyon, mga ₱18 ang minimum. Cash o Beep card." } },
+      fare: { en: "Priced station to station: about ₱15–₱18 for nearby stops, up to about ₱85 end to end. Cash or Beep card.", tl: "Depende sa istasyon: mga ₱15–₱18 sa malapit, hanggang mga ₱85 dulo hanggang dulo. Cash o Beep card." } },
     { icon: "bi-gift", mode: { en: "Q City Bus (city government)", tl: "Q City Bus (gobyerno ng QC)" },
       fare: { en: "FREE. 8 routes, most start at Quezon City Hall.", tl: "LIBRE. 8 ruta, karamihan nagsisimula sa Quezon City Hall." }, free: true },
     { icon: "bi-car-front", mode: { en: "UV Express", tl: "UV Express" },

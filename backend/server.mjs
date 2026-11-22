@@ -45,6 +45,8 @@ const FARE_REFERENCE = `Metro Manila fares in force since September 28, 2026 (re
 - Q City Bus (Quezon City government): FREE. 8 routes: 1 QC Hall-Cubao, 2 QC Hall-Litex/IBP Road, 3 Welcome Rotonda-Aurora Blvd/Katipunan, 4 QC Hall-General Luis, 5 QC Hall-Mindanao Ave, 6 QC Hall-Gilmore, 7 QC Hall-C5/Ortigas Ave Ext, 8 QC Hall-Munoz.
 - MRT-3: PHP 13-28 regular, 50% off for everyone since March 23, 2026 (about PHP 6.50-14). LRT-2: 50% off for everyone (about PHP 6.50-16.50 Beep). LRT-1: regular fares (about PHP 16-52 Beep, PHP 20-55 single journey).
 - MRT-7 is NOT open yet. Do not suggest it.
+- EDSA Carousel (Route 1, busway in the middle of EDSA) stops in Quezon City, north to south: Balintawak, Kaingin Road, Roosevelt, SM North EDSA, North Avenue, Philam QC, Quezon Avenue, Kamuning, Nepa Q-Mart, Main Avenue (Cubao), Santolan. Use the footbridge to reach the stop.
+- City bus routes through Quezon City (number: route, main QC roads): 3 Antipolo-Cubao/Quiapo (Ortigas Ave Ext); 6 Sapang Palay-PITX (Quezon Ave); 6A Sapang Palay-NIA Road (East Ave); 7 Fairview-PITX (Commonwealth, Elliptical Rd, Quezon Ave); 17 Fairview-Ayala (Commonwealth, Quezon Ave); 18 North EDSA-PITX (C-5); 33 Starmall SJDM-North EDSA; 33X Fairview-One Ayala (Commonwealth, EDSA Busway); 34 Rodriguez-PITX (Commonwealth, Quezon Ave); 36 Fairview-Alabang; 38 and 40 Fairview-Pacita/Alabang via Ayala (Commonwealth, Quezon Ave); 39 and 41 Fairview-Pacita/FTI via C-5; 49 Starmall SJDM-NAIA (Quezon Ave); 51 Valenzuela Gateway-Cubao (Mindanao Ave, SM North EDSA); 53 Cubao-Pacita (E. Rodriguez); 61 Cubao-Dasmarinas. When you suggest a city bus, give its route number and say to check the signboard.
 - Taxi (provisional): PHP 65 flag-down + PHP 13.50/km + PHP 2/min. Grab/TNVS sedan: PHP 65 base + PHP 15/km + PHP 2/min (+ pick-up fare). Motorcycle taxi (Angkas, JoyRide, Move It): about PHP 50 for the first 2 km, then about PHP 10/km.`;
 
 // ---------- Server ----------
@@ -67,6 +69,7 @@ const server = http.createServer(async (request, response) => {
       // Test in a browser: /api/autocomplete?q=sandigan
       return await autocompleteEndpoint(response, { query: url.searchParams.get("q") || "" }, true);
     }
+    if (request.method === "GET" && url.pathname === "/feedback") return feedbackAdminPage(response, url);
     if (request.method === "GET" && url.pathname === "/api/ai-status") {
       return json(response, 200, await checkAi());
     }
@@ -77,6 +80,7 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === "/api/places") return await placesEndpoint(response, body);
     if (url.pathname === "/api/reverse") return await reverseEndpoint(response, body);
     if (url.pathname === "/api/autocomplete") return await autocompleteEndpoint(response, body);
+    if (url.pathname === "/api/feedback") return await feedbackEndpoint(request, response, body);
     if (url.pathname === "/api/place-details") return await placeDetailsEndpoint(response, body);
     if (url.pathname === "/api/commute-plan") return await commutePlanEndpoint(response, body);
     if (url.pathname === "/api/routes") {
@@ -166,6 +170,59 @@ async function searchNominatim(query, near) {
   return places;
 }
 
+// ---------- Feedback ----------
+// Saved to backend/feedback.jsonl and printed in the server log. On Render's free plan files are wiped on restart,
+// so set FEEDBACK_WEBHOOK_URL (a Discord or Slack webhook) to also receive every message there permanently.
+// Read them at /feedback?key=YOUR_FEEDBACK_ADMIN_KEY
+const FEEDBACK_FILE = path.join(HERE, "feedback.jsonl");
+const FEEDBACK_ADMIN_KEY = (process.env.FEEDBACK_ADMIN_KEY || "").trim();
+const FEEDBACK_WEBHOOK_URL = (process.env.FEEDBACK_WEBHOOK_URL || "").trim();
+const feedbackRecent = [];
+const feedbackRate = new Map();
+
+async function feedbackEndpoint(request, response, body) {
+  const ip = String(request.headers["x-forwarded-for"] || request.socket.remoteAddress || "").split(",")[0].trim();
+  const now = Date.now(), hits = (feedbackRate.get(ip) || []).filter((t) => now - t < 3600000);
+  if (hits.length >= 20) return json(response, 429, { error: "Too many messages. Please try again later." });
+  hits.push(now); feedbackRate.set(ip, hits);
+  const categories = ["plan", "map", "fares", "bug", "idea"];
+  const entry = {
+    at: new Date().toISOString(),
+    rating: ["up", "down"].includes(body.rating) ? body.rating : "",
+    category: categories.includes(body.category) ? body.category : "idea",
+    message: cleanText(body.message, 1000), contact: cleanText(body.contact, 120),
+    from: cleanText(body.trip?.from, 160), to: cleanText(body.trip?.to, 160),
+    lang: body.lang === "tl" ? "tl" : "en", page: cleanText(body.page, 20), model: cleanText(body.model, 60)
+  };
+  if (!entry.message && !entry.rating) return json(response, 400, { error: "Please choose Helpful / Not helpful or write a message." });
+  feedbackRecent.unshift(entry);
+  if (feedbackRecent.length > 500) feedbackRecent.pop();
+  try { fs.appendFileSync(FEEDBACK_FILE, JSON.stringify(entry) + "\n"); } catch (e) { console.warn("Could not save feedback file:", e.message); }
+  console.log("FEEDBACK", JSON.stringify(entry));
+  if (FEEDBACK_WEBHOOK_URL) {
+    const icon = entry.rating === "up" ? "👍" : entry.rating === "down" ? "👎" : "💬";
+    const text = `${icon} Komute feedback (${entry.category})${entry.from ? `\nTrip: ${entry.from} → ${entry.to}` : ""}${entry.message ? `\n${entry.message}` : ""}${entry.contact ? `\nFrom: ${entry.contact}` : ""}`.slice(0, 1900);
+    fetch(FEEDBACK_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text, text }), signal: AbortSignal.timeout(6000) })
+      .catch((e) => console.warn("Feedback webhook failed:", e.message));
+  }
+  return json(response, 200, { ok: true });
+}
+
+function feedbackAdminPage(response, url) {
+  const send = (status, html) => { response.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }); response.end(html); };
+  if (!FEEDBACK_ADMIN_KEY) return send(404, "<p>Feedback page is off. Set FEEDBACK_ADMIN_KEY on the server to turn it on.</p>");
+  if (url.searchParams.get("key") !== FEEDBACK_ADMIN_KEY) return send(403, "<p>Wrong or missing key.</p>");
+  let rows = [];
+  try { rows = fs.readFileSync(FEEDBACK_FILE, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)).reverse(); } catch { rows = feedbackRecent; }
+  const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const up = rows.filter((r) => r.rating === "up").length, down = rows.filter((r) => r.rating === "down").length;
+  send(200, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Komute feedback</title>
+  <style>body{font-family:system-ui;margin:1rem;color:#17211e}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top;font-size:.9rem}th{background:#d8f1e9}</style>
+  <h1>Komute feedback</h1><p>${rows.length} messages · 👍 ${up} · 👎 ${down}. Newest first. (Messages since the last server restart; use a webhook to keep all.)</p>
+  <table><tr><th>When</th><th>Rating</th><th>About</th><th>Trip</th><th>Message</th><th>Contact</th></tr>
+  ${rows.map((r) => `<tr><td>${esc(r.at.replace("T", " ").slice(0, 16))}</td><td>${r.rating === "up" ? "👍" : r.rating === "down" ? "👎" : ""}</td><td>${esc(r.category)}</td><td>${esc(r.from)}${r.to ? " → " + esc(r.to) : ""}</td><td>${esc(r.message)}</td><td>${esc(r.contact)}</td></tr>`).join("")}</table>`);
+}
+
 // ---------- Type-ahead suggestions (search as you type) ----------
 // Free by default: Photon (OpenStreetMap, made for search-as-you-type, no key).
 // Optional, better house-number coverage: GEOAPIFY_API_KEY (free 3,000/day) or GOOGLE_PLACES_API_KEY (needs Google billing).
@@ -203,11 +260,12 @@ async function autocompleteEndpoint(response, body, debug = false) {
   // A paid-data provider found only a few? Add OpenStreetMap results below them.
   if (used !== "photon" && list.length < 4) {
     try {
-      const names = new Set(list.map((x) => x.name.toLowerCase()));
-      (await photonAutocomplete(query, near)).forEach((x) => { if (!names.has(x.name.toLowerCase())) { names.add(x.name.toLowerCase()); list.push(x); } });
+      const dup = (x, y) => x.name.toLowerCase() === y.name.toLowerCase() &&
+        haversineKm(x.location, y.location) < 0.12; // same name AND same spot; different campuses stay
+      (await photonAutocomplete(query, near)).forEach((x) => { if (!list.some((y) => dup(x, y))) list.push(x); });
     } catch { /* fine */ }
   }
-  list = withHouseNumber(query, list).slice(0, 8);
+  list = withHouseNumber(query, list).slice(0, 10);
   if (debug) return json(response, 200, { query, provider: used, problems, suggestions: list });
   // only remember good answers, so a short outage is not cached
   if (list.length) acCache.set(key, { at: Date.now(), value: list, provider: used });
@@ -428,7 +486,7 @@ function buildPrompt({ origin, destination, beginnerMode, language, communityTip
   return [
     "You are the planning engine of Komute, a public-transport helper for commuters in Quezon City, Philippines.",
     `Service area: ${SERVICE_AREA.name} only. Keep every option, transfer point, and landmark inside ${SERVICE_AREA.name}. If the usual way leaves the city, say so in "outsideArea" and give only the part inside it.`,
-    "Plan 2 or 3 realistic options from Point A to Point B using jeepneys, modern jeepneys, city buses, the EDSA Carousel, the FREE Q City Bus, UV Express, tricycles, MRT-3, LRT-1, LRT-2, and walking. When it helps, add one door-to-door option (Grab/taxi or motorcycle taxi) as the last option.",
+    "Plan 2 or 3 realistic options from Point A to Point B using jeepneys, modern jeepneys, numbered city buses, the EDSA Carousel, the FREE Q City Bus, UV Express, tricycles, MRT-3, LRT-1, LRT-2, and walking. When it helps, add one door-to-door option (Grab/taxi or motorcycle taxi) as the last option.",
     "Be honest about certainty. Never say a route, stop, signboard, fare, or time is verified unless grounding evidence supports it. Use words like 'usually', 'about', 'likely'. Never invent exact schedules.",
     "Fares: compute an approximate fare for each ride with the fare table below and the distance. Write it like 'about PHP 14' or 'about PHP 14-18'. Q City Bus is free.",
     FARE_REFERENCE,

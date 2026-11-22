@@ -75,6 +75,12 @@
           map.on("mouseleave", "k-routes-alt", () => { map.getCanvas().style.cursor = ""; });
         }
       }
+      if (!map.getSource("k-transit")) {
+        map.addSource("k-transit", { type: "geojson", data: transitData() });
+        map.addLayer({ id: "k-transit", type: "circle", source: "k-transit",
+          layout: { visibility: state.transit ? "visible" : "none" },
+          paint: { "circle-color": ["get", "color"], "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 4, 15, 8], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
+      }
       if (!map.getSource("k-me-acc")) {
         map.addSource("k-me-acc", { type: "geojson", data: state.me ? K.geo.circle(state.me.p, state.me.acc) : empty() });
         map.addLayer({ id: "k-me-acc", type: "fill", source: "k-me-acc", paint: { "fill-color": "#1a73e8", "fill-opacity": 0.13 } });
@@ -83,6 +89,20 @@
     map.on("style.load", addLayers);
 
     const empty = () => ({ type: "FeatureCollection", features: [] });
+    const LINE_COLOR = { "MRT-3": "#2563eb", "LRT-1": "#16a34a", "LRT-2": "#7e22ce", "EDSA Carousel": "#dc2626" };
+    function transitData() {
+      return { type: "FeatureCollection", features: (K.data().transit.stations || []).map((st) => ({
+        type: "Feature", geometry: { type: "Point", coordinates: [st.lng, st.lat] },
+        properties: { name: st.name, line: st.line, color: LINE_COLOR[st.line] || "#444" } })) };
+    }
+    state.transit = K.store.get("showTransit", false);
+    // One tap handler: a station tap opens the station, any other tap goes to fn(e)
+    map.on("click", (e) => {
+      let hit = [];
+      try { if (state.transit && map.getLayer("k-transit")) hit = map.queryRenderedFeatures([[e.point.x - 8, e.point.y - 8], [e.point.x + 8, e.point.y + 8]], { layers: ["k-transit"] }); } catch { hit = []; }
+      if (hit.length && state.onStation) { const f = hit[0]; state.onStation({ ...f.properties, lngLat: { lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] } }); return; }
+      if (state.onTap) state.onTap(e);
+    });
     const ready = (fn) => (map.isStyleLoaded() ? fn() : map.once("load", fn));
     const setData = (id, data) => { const s = map.getSource(id); if (s) s.setData(data); };
 
@@ -113,6 +133,16 @@
       },
 
       onPinDrag(fn) { state.onDrag = fn; },
+      onTap(fn) { state.onTap = fn; },
+      onStation(fn) { state.onStation = fn; },
+      // Show/hide train stations and EDSA Carousel stops
+      setTransit(on, btn) {
+        state.transit = !!on;
+        K.store.set("showTransit", state.transit);
+        if (btn) btn.setAttribute("aria-pressed", String(state.transit));
+        ready(() => { addLayers(); if (map.getLayer("k-transit")) map.setLayoutProperty("k-transit", "visibility", state.transit ? "visible" : "none"); });
+      },
+      transitOn: () => state.transit,
 
       // A small info bubble on the map (used for "Start here / Go here")
       popup(lngLat, html) {

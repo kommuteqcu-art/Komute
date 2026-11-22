@@ -96,5 +96,7 @@
     return data.routes;
   }
 
-  K.api = { searchPlaces, autocomplete, placeDetails, planCommute, reverseGeocode, roadRoutes };
+  async function feedback(payload) { return post("/api/feedback", payload); }
+
+  K.api = { feedback, searchPlaces, autocomplete, placeDetails, planCommute, reverseGeocode, roadRoutes };
 })(window.Komute);
