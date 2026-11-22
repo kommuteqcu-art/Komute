@@ -26,9 +26,38 @@
 
   // Search-as-you-type suggestions (streets, buildings, barangays in Quezon City)
   async function autocomplete(query, near, sessionToken) {
-    const data = await post("/api/autocomplete", { query, near: point(near), sessionToken });
-    return data.suggestions || [];
+    let list = [];
+    try { list = (await post("/api/autocomplete", { query, near: point(near), sessionToken })).suggestions || []; } catch { /* use the backup */ }
+    if (list.length) return list;
+    try {
+      list = await photonDirect(query, near);
+      const m = query.match(/^\s*(\d+[a-zA-Z]?(?:-\d+)?)\s+(.+)/); // keep a typed house number
+      if (m) list = list.map((x) => (x.kind === "street" && !/^\d/.test(x.name) ? { ...x, name: `${m[1]} ${x.name}`, label: `${m[1]} ${x.label}`, approx: true } : x));
+    } catch { /* nothing more to try */ }
+    return list;
   }
+  // Backup: ask Photon (OpenStreetMap search-as-you-type) straight from this phone/browser.
+  const QC = { w: 120.98, s: 14.58, e: 121.14, n: 14.79 };
+  const OTHER = /\b(manila|caloocan|marikina|pasig|san juan|mandaluyong|valenzuela|malabon|navotas|makati|rizal|bulacan|san mateo|rodriguez)\b/i;
+  async function photonDirect(query, near) {
+    const b = near || { latitude: 14.6507, longitude: 121.0494 };
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=15&lang=en&bbox=${QC.w},${QC.s},${QC.e},${QC.n}&lat=${b.latitude}&lon=${b.longitude}`;
+    const data = await (await fetch(url)).json();
+    const seen = new Set();
+    return (data.features || []).map((f) => {
+      const p = f.properties || {}, [lon, lat] = (f.geometry && f.geometry.coordinates) || [];
+      const houseLine = p.housenumber ? `${p.housenumber} ${p.street || ""}`.trim() : "";
+      const name = p.name || houseLine || p.street || "";
+      const area = [p.name && p.street && p.name !== p.street ? (p.housenumber ? houseLine : p.street) : "", p.district || p.locality, "Quezon City"]
+        .filter((x, i, a) => x && a.indexOf(x) === i && x !== name);
+      const where = [p.city, p.county, p.district, p.locality, p.state].filter(Boolean).join(", ");
+      const inQC = /quezon city/i.test(where) || (!OTHER.test(where) && lat >= QC.s && lat <= QC.n && lon >= QC.w && lon <= QC.e);
+      const street = p.osm_key === "highway" || p.type === "street";
+      const kind = p.housenumber ? "place" : street ? "street" : /district|locality|suburb|quarter|neighbourhood/.test(p.type + " " + p.osm_value) ? "area" : "place";
+      return inQC && name ? { id: "pd:" + (p.osm_id || lat + "," + lon), name, sub: area.join(", "), label: [name, ...area].join(", "), kind, location: { latitude: lat, longitude: lon } } : null;
+    }).filter((x) => x && Number.isFinite(x.location.latitude) && !seen.has(x.label) && seen.add(x.label)).slice(0, 8);
+  }
+
   async function placeDetails(placeId, sessionToken) {
     return post("/api/place-details", { placeId, sessionToken });
   }

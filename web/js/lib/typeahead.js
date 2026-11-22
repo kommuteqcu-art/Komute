@@ -58,7 +58,7 @@
     list.setAttribute("role", "listbox");
 
     function render(raw, loading) {
-      if (!items.length && !loading) { close(); return; }
+      if (!items.length && !loading && raw.trim().length < 2) { close(); return; }
       list.innerHTML = items.map((it, i) => `<button type="button" role="option" id="${list.id}-o${i}" class="list-group-item list-group-item-action k-sugg${i === active ? " active" : ""}" data-i="${i}" aria-selected="${i === active}">
           <i class="bi ${ICON[it.kind] || ICON.place}"></i>
           <span><b>${highlight(it.name, raw)}</b>${it.sub ? `<small>${highlight(it.sub, raw)}</small>` : ""}${it.approx ? `<small class="k-approx">${K.esc(K.t("ta.approx"))}</small>` : ""}</span></button>`).join("") +
