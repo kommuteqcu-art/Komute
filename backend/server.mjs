@@ -59,9 +59,13 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/health") {
       return json(response, 200, {
         ok: true, version: "15", webFolder: WEB_DIR || "NOT FOUND",
-        placeSearch: "Nominatim", autocomplete: GOOGLE_PLACES_KEY ? "Google Places" : GEOAPIFY_KEY ? "Geoapify" : "Photon (OpenStreetMap)", aiConfigured: PROVIDERS.length > 0, aiProviders: PROVIDERS.map(providerName), aiModels: MODELS,
+        placeSearch: "Nominatim", autocomplete: GOOGLE_PLACES_KEY ? "Google Places" : TOMTOM_KEY ? "TomTom" : GEOAPIFY_KEY ? "Geoapify" : "Photon (OpenStreetMap)", aiConfigured: PROVIDERS.length > 0, aiProviders: PROVIDERS.map(providerName), aiModels: MODELS,
         mapsGroundingRequested: MAPS_GROUNDING, lastAiResult, redditConfigured: redditConfigured()
       });
+    }
+    if (request.method === "GET" && url.pathname === "/api/autocomplete") {
+      // Test in a browser: /api/autocomplete?q=sandigan
+      return await autocompleteEndpoint(response, { query: url.searchParams.get("q") || "" }, true);
     }
     if (request.method === "GET" && url.pathname === "/api/ai-status") {
       return json(response, 200, await checkAi());
@@ -112,6 +116,12 @@ async function reverseEndpoint(response, body) {
   const key = `rev|${lat.toFixed(5)},${lon.toFixed(5)}`;
   const cached = placeCache.get(key);
   if (cached) return json(response, 200, cached.value);
+  if (TOMTOM_KEY) {
+    try {
+      const t = await tomtomReverse(lat, lon);
+      if (t) { placeCache.set(key, { savedAt: Date.now(), value: t }); return json(response, 200, t); }
+    } catch (e) { console.warn("TomTom address lookup failed:", e.message); }
+  }
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("zoom", "18");
@@ -162,10 +172,12 @@ async function searchNominatim(query, near) {
 const PHOTON_URL = (process.env.PHOTON_URL || "https://photon.komoot.io").replace(/\/$/, "");
 const GEOAPIFY_KEY = (process.env.GEOAPIFY_API_KEY || "").trim();
 const GOOGLE_PLACES_KEY = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
+const TOMTOM_KEY = (process.env.TOMTOM_API_KEY || "").trim();
+const TOMTOM_BASE = (process.env.TOMTOM_API_BASE || "https://api.tomtom.com").replace(/\/$/, ""); // free 2,500 requests/day, no card: developer.tomtom.com
 const OTHER_CITIES = /\b(manila|caloocan|marikina|pasig|san juan|mandaluyong|valenzuela|malabon|navotas|makati|rizal|bulacan|san mateo|rodriguez)\b/i;
 const acCache = new Map();
 
-async function autocompleteEndpoint(response, body) {
+async function autocompleteEndpoint(response, body, debug = false) {
   const query = cleanText(body.query, 120);
   if (query.length < 2) return json(response, 200, { suggestions: [] });
   const near = validCoordinate(body.near) ? { latitude: Number(body.near.latitude), longitude: Number(body.near.longitude) } : null;
@@ -173,17 +185,32 @@ async function autocompleteEndpoint(response, body) {
   const hit = acCache.get(key);
   if (hit && Date.now() - hit.at < 30 * 60 * 1000) return json(response, 200, { suggestions: hit.value, provider: hit.provider });
 
-  const providers = [GOOGLE_PLACES_KEY && ["google", googleAutocomplete], GEOAPIFY_KEY && ["geoapify", geoapifyAutocomplete], ["photon", photonAutocomplete]].filter(Boolean);
+  const providers = [GOOGLE_PLACES_KEY && ["google", googleAutocomplete], TOMTOM_KEY && ["tomtom", tomtomAutocomplete],
+    GEOAPIFY_KEY && ["geoapify", geoapifyAutocomplete], ["photon", photonAutocomplete]].filter(Boolean);
   let list = [], used = "none";
+  const problems = [];
   for (const [name, fn] of providers) {
     try {
       list = await fn(query, near, body.sessionToken);
       used = name;
       if (list.length) break;
-    } catch (e) { console.warn(`Autocomplete via ${name} failed: ${e.message}`); }
+      problems.push(`${name}: no results`);
+    } catch (e) {
+      problems.push(`${name}: ${e.message}`);
+      console.warn(`Autocomplete via ${name} failed: ${e.message}`);
+    }
+  }
+  // A paid-data provider found only a few? Add OpenStreetMap results below them.
+  if (used !== "photon" && list.length < 4) {
+    try {
+      const names = new Set(list.map((x) => x.name.toLowerCase()));
+      (await photonAutocomplete(query, near)).forEach((x) => { if (!names.has(x.name.toLowerCase())) { names.add(x.name.toLowerCase()); list.push(x); } });
+    } catch { /* fine */ }
   }
   list = withHouseNumber(query, list).slice(0, 8);
-  acCache.set(key, { at: Date.now(), value: list, provider: used });
+  if (debug) return json(response, 200, { query, provider: used, problems, suggestions: list });
+  // only remember good answers, so a short outage is not cached
+  if (list.length) acCache.set(key, { at: Date.now(), value: list, provider: used });
   if (acCache.size > 2000) acCache.delete(acCache.keys().next().value);
   return json(response, 200, { suggestions: list, provider: used });
 }
@@ -221,7 +248,10 @@ async function photonAutocomplete(query, near) {
   const bias = near || { latitude: 14.6507, longitude: 121.0494 };
   url.searchParams.set("lat", String(bias.latitude));
   url.searchParams.set("lon", String(bias.longitude));
-  const res = await fetch(url, { headers: { "User-Agent": NOMINATIM_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(6000) });
+  let res;
+  try {
+    res = await fetch(url, { headers: { "User-Agent": NOMINATIM_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(7000) });
+  } catch (e) { throw new Error(`Photon not reachable (${e.cause?.code || e.name})`); }
   if (!res.ok) throw new Error("Photon HTTP " + res.status);
   const data = await res.json();
   const seen = new Set();
@@ -238,6 +268,55 @@ async function photonAutocomplete(query, near) {
     };
   }).filter((s) => s.keep && s.name && Number.isFinite(s.location.latitude) && !seen.has(s.label) && seen.add(s.label))
     .map(({ keep, ...s }) => s);
+}
+
+// TomTom Search (commercial map data: schools, malls, offices, numbered addresses). Uses the gate/entrance point when known.
+async function tomtomAutocomplete(query, near) {
+  const url = new URL(`${TOMTOM_BASE}/search/2/search/${encodeURIComponent(query)}.json`);
+  url.searchParams.set("key", TOMTOM_KEY);
+  url.searchParams.set("typeahead", "true");
+  url.searchParams.set("limit", "10");
+  url.searchParams.set("countrySet", "PH");
+  url.searchParams.set("language", "en-US");
+  url.searchParams.set("topLeft", `${SERVICE_AREA.north},${SERVICE_AREA.west}`);
+  url.searchParams.set("btmRight", `${SERVICE_AREA.south},${SERVICE_AREA.east}`);
+  const bias = near || { latitude: 14.6507, longitude: 121.0494 };
+  url.searchParams.set("lat", String(bias.latitude));
+  url.searchParams.set("lon", String(bias.longitude));
+  let res;
+  try { res = await fetch(url, { signal: AbortSignal.timeout(6000) }); } catch (e) { throw new Error(`TomTom not reachable (${e.cause?.code || e.name})`); }
+  if (!res.ok) throw new Error("TomTom HTTP " + res.status + (res.status === 403 ? " (check TOMTOM_API_KEY)" : res.status === 429 ? " (daily free limit reached)" : ""));
+  const data = await res.json();
+  const seen = new Set();
+  return (data.results || []).map((r) => {
+    const a = r.address || {};
+    const pos = (r.entryPoints || []).find((e) => e.type === "main")?.position || r.position || {};
+    const numbered = a.streetNumber ? `${a.streetNumber} ${a.streetName || ""}`.trim() : "";
+    const name = r.poi?.name || numbered || a.streetName || a.municipalitySubdivision || a.freeformAddress || "";
+    const sub = [r.poi ? (numbered || a.streetName) : "", a.municipalitySubdivision, "Quezon City"]
+      .filter((x, i, arr) => x && arr.indexOf(x) === i && x !== name).join(", ");
+    const kind = r.type === "POI" ? "place" : /street/i.test(r.type) ? "street" : /address/i.test(r.type) ? "place" : "area";
+    return {
+      id: "tt:" + (r.id || pos.lat + "," + pos.lon), name, sub, label: [name, sub].filter(Boolean).join(", "), kind,
+      location: { latitude: pos.lat, longitude: pos.lon },
+      keep: inQC([a.municipality, a.municipalitySubdivision, a.countrySecondarySubdivision, a.freeformAddress], pos.lat, pos.lon)
+    };
+  }).filter((x) => x.keep && x.name && Number.isFinite(x.location.latitude) && !seen.has(x.label) && seen.add(x.label))
+    .map(({ keep, ...x }) => x);
+}
+
+async function tomtomReverse(lat, lon) {
+  const url = new URL(`${TOMTOM_BASE}/search/2/reverseGeocode/${lat},${lon}.json`);
+  url.searchParams.set("key", TOMTOM_KEY);
+  url.searchParams.set("language", "en-US");
+  url.searchParams.set("returnSpeedLimit", "false");
+  const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+  if (!res.ok) throw new Error("TomTom reverse HTTP " + res.status);
+  const a = (await res.json()).addresses?.[0]?.address;
+  if (!a) return null;
+  const parts = [a.streetNumber && a.streetName ? `${a.streetNumber} ${a.streetName}` : a.streetName, a.municipalitySubdivision, a.municipality].filter(Boolean);
+  const label = cleanText(parts.join(", ") || a.freeformAddress, 240);
+  return label ? { label, inArea: /quezon city/i.test(label + " " + (a.freeformAddress || "")) || insideServiceArea({ latitude: lat, longitude: lon }) } : null;
 }
 
 async function geoapifyAutocomplete(query, near) {
@@ -354,6 +433,7 @@ function buildPrompt({ origin, destination, beginnerMode, language, communityTip
     "Fares: compute an approximate fare for each ride with the fare table below and the distance. Write it like 'about PHP 14' or 'about PHP 14-18'. Q City Bus is free.",
     FARE_REFERENCE,
     "Write very simple sentences that a first-time commuter can follow. Each step does one thing.",
+    "KEEP IT SHORT: at most 7 steps per option. Each text value at most 20 words; 'where' and 'getOff' at most 12 words; 'sign' at most 5 words. No long explanations.",
     "For every ride step: 'where' = exactly where to stand or board (street, side of the road, landmark, terminal, or station); 'sign' = the words likely written on the vehicle's route signboard (for example 'CUBAO - QUIAPO'), or the train direction (for example 'Southbound to Taft'); 'getOff' = the landmark or stop where to get off and what to say ('Para po').",
     beginnerMode
       ? "New Commuter Mode is ON: explain how to spot the right vehicle, how to pay, and where to ask for help. Add 4 to 6 short tips."
@@ -612,7 +692,7 @@ async function generateCompat(id, prompt, maxMs) {
     for (const json of [true, false]) {
       if (Date.now() + 4000 > deadline) break;
       const body = {
-        model, temperature: 0.3, max_tokens: 6000,
+        model, temperature: 0.3, max_tokens: 7000,
         messages: [
           { role: "system", content: "You are Komute's commute planner. Reply with one valid JSON object only." },
           { role: "user", content: prompt }
@@ -624,7 +704,10 @@ async function generateCompat(id, prompt, maxMs) {
       last = { model, ...res };
       if (res.ok) {
         const text = String(res.data?.choices?.[0]?.message?.content || "").trim();
-        if (text) return { text, data: {}, model: `${c.name}: ${model}` };
+        if (text) {
+          if (res.data?.choices?.[0]?.finish_reason === "length") console.warn(`${c.name} answer was cut off; Komute will repair it.`);
+          return { text, data: {}, model: `${c.name}: ${model}` };
+        }
         last = { ...last, ok: false, empty: res.data?.choices?.[0]?.finish_reason || "EMPTY" };
         break;
       }
@@ -658,13 +741,58 @@ async function checkAi() {
 }
 
 // ---------- Plan JSON helpers ----------
-function parseGuide(text) {
+// Turns almost-JSON from an AI into a real object: removes code fences, escapes line breaks
+// inside strings, drops trailing commas, and closes an answer that was cut off.
+function repairJson(text) {
   if (!text) return null;
-  let s = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a < 0 || b <= a) return null;
+  let s = String(text).trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const start = s.indexOf("{");
+  if (start < 0) return null;
+  s = s.slice(start);
+  const tryParse = (t) => { try { return JSON.parse(t); } catch { return undefined; } };
+  let v = tryParse(s.slice(0, s.lastIndexOf("}") + 1));
+  if (v !== undefined) return v;
+  // escape raw control characters inside strings
+  let out = "", inStr = false, esc = false;
+  for (const ch of s) {
+    if (inStr) {
+      if (esc) { esc = false; out += ch; continue; }
+      if (ch === "\\") { esc = true; out += ch; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === "\n") { out += "\\n"; continue; }
+      if (ch === "\r") continue;
+      if (ch === "\t") { out += " "; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  s = out.replace(/,\s*([}\]])/g, "$1");
+  v = tryParse(s.slice(0, s.lastIndexOf("}") + 1));
+  if (v !== undefined) return v;
+  // cut off: go back to a closed object and close everything still open
+  const closers = (prefix) => {
+    const stack = []; let q = false, e = false;
+    for (const ch of prefix) {
+      if (q) { if (e) e = false; else if (ch === "\\") e = true; else if (ch === '"') q = false; continue; }
+      if (ch === '"') q = true; else if (ch === "{" || ch === "[") stack.push(ch); else if (ch === "}" || ch === "]") stack.pop();
+    }
+    return q ? null : stack.reverse().map((c) => (c === "{" ? "}" : "]")).join("");
+  };
+  let tries = 0;
+  for (let i = s.length; i > 0 && tries < 400; i--) {
+    if (s[i - 1] !== "}" && s[i - 1] !== "]") continue;
+    tries++;
+    const prefix = s.slice(0, i).replace(/,\s*$/, "");
+    const c = closers(prefix);
+    if (c === null) continue;
+    v = tryParse((prefix + c).replace(/,\s*([}\]])/g, "$1"));
+    if (v !== undefined) return v;
+  }
+  return null;
+}
+
+function parseGuide(text) {
   try {
-    const g = JSON.parse(s.slice(a, b + 1));
+    const g = repairJson(text);
     if (!g || !Array.isArray(g.options) || !g.options.length) return null;
     const str = (v, n = 400) => cleanText(v, n);
     return {
