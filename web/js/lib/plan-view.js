@@ -68,8 +68,69 @@
     </details>`;
   }
 
+  // Same repair the server does, in case an older server sent the raw answer.
+  // Turns almost-JSON from an AI into a real object: removes code fences, escapes line breaks
+  // inside strings, drops trailing commas, and closes an answer that was cut off.
+  function repairJson(text) {
+    if (!text) return null;
+    let s = String(text).trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+    const start = s.indexOf("{");
+    if (start < 0) return null;
+    s = s.slice(start);
+    const tryParse = (t) => { try { return JSON.parse(t); } catch { return undefined; } };
+    let v = tryParse(s.slice(0, s.lastIndexOf("}") + 1));
+    if (v !== undefined) return v;
+    // escape raw control characters inside strings
+    let out = "", inStr = false, esc = false;
+    for (const ch of s) {
+      if (inStr) {
+        if (esc) { esc = false; out += ch; continue; }
+        if (ch === "\\") { esc = true; out += ch; continue; }
+        if (ch === '"') { inStr = false; out += ch; continue; }
+        if (ch === "\n") { out += "\\n"; continue; }
+        if (ch === "\r") continue;
+        if (ch === "\t") { out += " "; continue; }
+        out += ch;
+      } else { if (ch === '"') inStr = true; out += ch; }
+    }
+    s = out.replace(/,\s*([}\]])/g, "$1");
+    v = tryParse(s.slice(0, s.lastIndexOf("}") + 1));
+    if (v !== undefined) return v;
+    // cut off: go back to a closed object and close everything still open
+    const closers = (prefix) => {
+      const stack = []; let q = false, e = false;
+      for (const ch of prefix) {
+        if (q) { if (e) e = false; else if (ch === "\\") e = true; else if (ch === '"') q = false; continue; }
+        if (ch === '"') q = true; else if (ch === "{" || ch === "[") stack.push(ch); else if (ch === "}" || ch === "]") stack.pop();
+      }
+      return q ? null : stack.reverse().map((c) => (c === "{" ? "}" : "]")).join("");
+    };
+    let tries = 0;
+    for (let i = s.length; i > 0 && tries < 400; i--) {
+      if (s[i - 1] !== "}" && s[i - 1] !== "]") continue;
+      tries++;
+      const prefix = s.slice(0, i).replace(/,\s*$/, "");
+      const c = closers(prefix);
+      if (c === null) continue;
+      v = tryParse((prefix + c).replace(/,\s*([}\]])/g, "$1"));
+      if (v !== undefined) return v;
+    }
+    return null;
+  }
+
   function render(ai) {
-    const g = ai.guide;
+    let g = ai.guide;
+    if ((!g || !g.options) && /^\s*(```|\{)/.test(ai.plan || "")) {
+      const fixed = repairJson(ai.plan);
+      if (fixed && Array.isArray(fixed.options)) {
+        g = { summary: fixed.summary || "", outsideArea: fixed.outsideArea || "", tips: fixed.tips || [], checks: fixed.checks || [],
+          options: fixed.options.map((o) => ({ ...o, steps: (o.steps || []).filter((st) => st && st.text) })).filter((o) => o.title && o.steps.length) };
+        ai.guide = g;
+      } else {
+        return `<div class="alert k-warn"><i class="bi bi-exclamation-circle"></i> ${K.esc(K.t("plan.unreadable"))}</div>
+          <button type="button" class="btn btn-primary" onclick="Komute.app.requestPlan()"><i class="bi bi-arrow-clockwise"></i> ${K.esc(K.t("res.retry"))}</button>`;
+      }
+    }
     if (!g || !g.options || !g.options.length) return K.planCards(ai.plan) || `<div class="k-plan">${K.planToHtml(ai.plan)}</div>`;
     return `${g.summary ? `<p class="k-intro">${K.esc(g.summary)}</p>` : ""}
       ${g.outsideArea ? `<div class="alert k-warn small"><i class="bi bi-exclamation-circle"></i> ${K.esc(g.outsideArea)}</div>` : ""}
