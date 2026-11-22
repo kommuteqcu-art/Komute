@@ -102,11 +102,26 @@
       setEndpoints(a, b, { fit = true } = {}) {
         for (const [k, p] of [["a", a], ["b", b]]) {
           if (!p) { if (markers[k]) { markers[k].remove(); markers[k] = null; } continue; }
-          if (!markers[k]) markers[k] = new maplibregl.Marker({ element: pinEl(k), anchor: "bottom" });
+          if (!markers[k]) {
+            markers[k] = new maplibregl.Marker({ element: pinEl(k), anchor: "bottom", draggable: !!opts.draggable });
+            // drag a pin to fine-tune the exact spot (house, gate, corner)
+            markers[k].on("dragend", () => { if (state.onDrag) state.onDrag(k, markers[k].getLngLat()); });
+          }
           markers[k].setLngLat([p.longitude, p.latitude]).addTo(map);
         }
         if (fit) api.fit([a, b].filter(Boolean));
       },
+
+      onPinDrag(fn) { state.onDrag = fn; },
+
+      // A small info bubble on the map (used for "Start here / Go here")
+      popup(lngLat, html) {
+        if (state.pop) state.pop.remove();
+        state.pop = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "290px", offset: 8 })
+          .setLngLat(lngLat).setHTML(html).addTo(map);
+        return state.pop.getElement();
+      },
+      closePopup() { if (state.pop) { state.pop.remove(); state.pop = null; } },
 
       fit(points, { padding = 70, maxZoom = 16 } = {}) {
         if (!points.length) return;

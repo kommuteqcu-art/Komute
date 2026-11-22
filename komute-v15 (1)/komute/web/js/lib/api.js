@@ -24,6 +24,15 @@
     return data.suggestions || [];
   }
 
+  // Search-as-you-type suggestions (streets, buildings, barangays in Quezon City)
+  async function autocomplete(query, near, sessionToken) {
+    const data = await post("/api/autocomplete", { query, near: point(near), sessionToken });
+    return data.suggestions || [];
+  }
+  async function placeDetails(placeId, sessionToken) {
+    return post("/api/place-details", { placeId, sessionToken });
+  }
+
   async function planCommute({ originText, destinationText, origin, destination, beginnerMode, language }) {
     const data = await post("/api/commute-plan", {
       origin: { text: originText, location: point(origin) },
@@ -58,5 +67,5 @@
     return data.routes;
   }
 
-  K.api = { searchPlaces, planCommute, reverseGeocode, roadRoutes };
+  K.api = { searchPlaces, autocomplete, placeDetails, planCommute, reverseGeocode, roadRoutes };
 })(window.Komute);

@@ -4,20 +4,25 @@
 (function (K) {
   const S = K.state;
   const $ = (id) => document.getElementById(id);
-  let km = null, pinTarget = null, pinLookup = null, pickTarget = "destination", pickModal, saveModal, saveTarget;
+  let km = null, taOrigin = null, taDest = null, pinTarget = null, pinLookup = null, pickTarget = "destination", pickModal, saveModal, saveTarget;
 
   function init() {
-    km = K.maps.create("planMap");
+    km = K.maps.create("planMap", { draggable: true });
     if (km) {
       km.bindCompass($("planCompass"));
       km.labelStyle($("planStyleBtn"));
       $("planStyleBtn").onclick = () => km.nextStyle($("planStyleBtn"));
-      km.map.on("click", (e) => { if (pinTarget) km.map.easeTo({ center: e.lngLat, duration: 400 }); });
+      km.map.on("click", onMapTap);
       km.map.on("moveend", K.debounce(previewPin, 700));
+      km.onPinDrag(onPinDrag);
       km.ready(syncMarkers);
+      $("planExpandBtn").onclick = () => setExpanded(!document.body.classList.contains("k-mapfull"));
     } else {
-      ["btnPin", "btnPinStart", "planStyleBtn", "planCompass"].forEach((id) => $(id) && $(id).classList.add("d-none"));
+      ["btnPin", "btnPinStart", "planStyleBtn", "planCompass", "planExpandBtn"].forEach((id) => $(id) && $(id).classList.add("d-none"));
     }
+    // Search as you type
+    taOrigin = K.typeahead.attach($("origin"), $("originSuggestions"), { onPick: (it) => pickSuggestion("origin", it) });
+    taDest = K.typeahead.attach($("destination"), $("suggestions"), { onPick: (it) => pickSuggestion("destination", it), near: () => S.originPoint });
     pickModal = new bootstrap.Modal($("pickModal"));
     saveModal = new bootstrap.Modal($("saveModal"));
 
@@ -25,17 +30,13 @@
     $("origin").addEventListener("input", (e) => {
       S.origin = e.target.value;
       if (S.originPoint && S.originPoint.label !== S.origin) S.originPoint = null;
-      $("originSuggestions").innerHTML = "";
       syncMarkers(false); updateFind();
     });
-    $("origin").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); search("origin"); } });
     $("destination").addEventListener("input", (e) => {
       S.destination = e.target.value;
       if (S.destinationPoint && S.destinationPoint.label !== S.destination) S.destinationPoint = null;
-      $("suggestions").innerHTML = "";
       syncMarkers(false); updateFind();
     });
-    $("destination").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); search("destination"); } });
 
     $("btnClearOrigin").onclick = () => { setText("origin", ""); $("origin").focus(); };
     $("btnClearDest").onclick = () => { setText("destination", ""); $("destination").focus(); };
@@ -109,26 +110,67 @@
   }
 
   // ---------- search ----------
-  async function search(target) {
+  // The Search button opens the suggestion list right away (suggestions also appear while typing).
+  function search(target) {
     const q = (target === "origin" ? S.origin : S.destination).trim();
     if (!q) { status(K.t(target === "origin" ? "home.typeStart" : "home.typeDest")); $(inputId(target)).focus(); return; }
-    status(K.t("home.searching"));
-    const list = $(listId(target));
-    list.innerHTML = `<div class="list-group-item text-muted"><span class="spinner-border spinner-border-sm"></span> ${K.esc(K.t("home.searching"))}</div>`;
-    try {
-      const results = await K.api.searchPlaces(q, target === "destination" ? S.originPoint : null);
-      if (!results.length) { list.innerHTML = ""; status(K.t("home.noMatch"), true); return; }
-      status(K.t("home.selectOne"));
-      list.innerHTML = results.map((p, i) => `<button type="button" class="list-group-item list-group-item-action k-sugg" data-i="${i}">
-        <i class="bi bi-geo-alt"></i><span><b>${K.esc(K.fmt.first(p.label))}</b><small>${K.esc(p.label.split(",").slice(1, 4).join(","))}</small></span></button>`).join("");
-      list.querySelectorAll("button").forEach((b) => {
-        b.onclick = () => {
-          const p = results[Number(b.dataset.i)];
-          setPoint(target, { latitude: p.location.latitude, longitude: p.location.longitude, label: p.label });
-          status(K.t(target === "origin" ? "home.startSet" : "home.destSet"));
-        };
-      });
-    } catch (e) { list.innerHTML = ""; status(e.message, true); }
+    status("");
+    $(inputId(target)).focus();
+    (target === "origin" ? taOrigin : taDest).search();
+  }
+
+  function pickSuggestion(target, it) {
+    if (it.location) {
+      const base = it.display || it.name;
+      const name = /quezon city/i.test(base) ? base : `${base}, Quezon City`;
+      setPoint(target, { latitude: it.location.latitude, longitude: it.location.longitude, label: it.label || name }, name);
+      status(K.t(target === "origin" ? "home.startSet" : "home.destSet") + (it.approx ? " " + K.t("ta.dragHint") : ""));
+    } else {
+      setText(target, it.display || it.label || it.name);
+      status(K.t("ta.noSpot"), true);
+    }
+    if (target === "origin" && !S.destination.trim()) setTimeout(() => $("destination").focus(), 50);
+  }
+
+  // ---------- tap the map: "Start here" / "Go here" ----------
+  async function onMapTap(e) {
+    if (pinTarget) { km.map.easeTo({ center: e.lngLat, duration: 400 }); return; }
+    const p = { latitude: e.lngLat.lat, longitude: e.lngLat.lng };
+    if (!K.maps.inQC(p)) { km.popup(e.lngLat, `<div class="k-pop">${K.esc(K.t("pin.outside"))}</div>`); return; }
+    const el = km.popup(e.lngLat, `<div class="k-pop"><div class="k-pop-addr"><span class="spinner-border spinner-border-sm"></span> ${K.esc(K.t("pin.finding"))}</div>
+      <div class="k-pop-btns"><button type="button" class="btn btn-sm btn-outline-primary" data-t="origin"><span class="k-dotmini a"></span> ${K.esc(K.t("pop.start"))}</button>
+      <button type="button" class="btn btn-sm btn-primary" data-t="destination"><span class="k-dotmini b"></span> ${K.esc(K.t("pop.go"))}</button></div></div>`);
+    let found = null;
+    const use = async (target) => {
+      km.closePopup();
+      const r = found || await K.api.reverseGeocode(p.latitude, p.longitude);
+      if (r.inArea === false) { status(K.t("pin.outside"), true); return; }
+      setPoint(target, { ...p, label: r.label });
+      status(K.t(target === "origin" ? "pin.startSet" : "pin.destSet"));
+    };
+    el.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => use(b.dataset.t));
+    found = await K.api.reverseGeocode(p.latitude, p.longitude);
+    const addr = el.querySelector(".k-pop-addr");
+    if (addr) addr.textContent = found.inArea === false ? K.t("pin.outside") : K.fmt.shortLabel(found.label);
+  }
+
+  // Dragging the A or B pin moves that point to the exact spot.
+  async function onPinDrag(kind, lngLat) {
+    const target = kind === "a" ? "origin" : "destination";
+    const p = { latitude: lngLat.lat, longitude: lngLat.lng };
+    if (!K.maps.inQC(p)) { status(K.t("pin.outside"), true); syncMarkers(false); return; }
+    status(K.t("pin.finding"));
+    const r = await K.api.reverseGeocode(p.latitude, p.longitude);
+    if (r.inArea === false) { status(K.t("pin.outside"), true); syncMarkers(false); return; }
+    setPoint(target, { ...p, label: r.label });
+    status(K.t(target === "origin" ? "pin.startSet" : "pin.destSet"));
+  }
+
+  function setExpanded(on) {
+    document.body.classList.toggle("k-mapfull", on);
+    $("planExpandBtn").innerHTML = `<i class="bi ${on ? "bi-fullscreen-exit" : "bi-arrows-fullscreen"}"></i>`;
+    $("planExpandBtn").setAttribute("aria-label", K.t(on ? "map.shrink" : "map.expand"));
+    setTimeout(() => km && km.resize(), 80);
   }
 
   // ---------- my location ----------
@@ -161,7 +203,7 @@
     $("pinBarText").textContent = K.t("pin.drag");
     $("btnPinStart").setAttribute("aria-pressed", String(target === "origin"));
     $("btnPin").setAttribute("aria-pressed", String(target === "destination"));
-    $("planMapWrap").scrollIntoView({ behavior: "smooth", block: "center" });
+    if (window.innerWidth < 992) setExpanded(true); else $("planMapWrap").scrollIntoView({ behavior: "smooth", block: "center" });
     previewPin();
   }
 
@@ -171,6 +213,7 @@
     $("pinBar").classList.add("d-none");
     $("btnPinStart").setAttribute("aria-pressed", "false");
     $("btnPin").setAttribute("aria-pressed", "false");
+    if (document.body.classList.contains("k-mapfull")) setExpanded(false);
   }
 
   async function previewPin() {

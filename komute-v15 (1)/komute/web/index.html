@@ -60,7 +60,7 @@
           <div class="k-trip-fields">
             <label class="k-label" for="origin"><span class="k-step">1</span> <span data-i18n="home.from">Where are you starting?</span></label>
             <div class="k-field">
-              <input id="origin" class="form-control form-control-lg" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.fromPh" placeholder="Type a place or use your location">
+              <input id="origin" class="form-control form-control-lg" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.fromPh" placeholder="Type a barangay, street, or place">
               <button id="btnClearOrigin" class="k-ib-sm" type="button" data-i18n-aria="home.clear" aria-label="Clear"><i class="bi bi-x-circle-fill"></i></button>
               <button id="btnStarOrigin" class="k-ib-sm" type="button" data-i18n-aria="save.this" aria-label="Save this place"><i class="bi bi-star"></i></button>
             </div>
@@ -71,7 +71,7 @@
               <button id="btnPickStart" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
             </div>
             <div id="quickStart" class="k-chips"></div>
-            <div id="originSuggestions" class="list-group k-sugglist"></div>
+            <div id="originSuggestions" class="list-group k-sugglist" aria-live="polite"></div>
 
             <button id="btnSwapHome" type="button" class="k-swap" data-i18n-aria="home.swap" aria-label="Swap start and destination"><i class="bi bi-arrow-down-up"></i></button>
 
@@ -87,7 +87,7 @@
               <button id="btnPickDest" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
             </div>
             <div id="quick" class="k-chips"></div>
-            <div id="suggestions" class="list-group k-sugglist"></div>
+            <div id="suggestions" class="list-group k-sugglist" aria-live="polite"></div>
           </div>
         </div>
         <div id="placeStatus" class="k-hint" role="status" aria-live="polite"></div>
@@ -119,6 +119,7 @@
         <div class="k-mapbtns">
           <button id="planCompass" type="button" class="k-fab-sm k-compass" data-i18n-aria="map.compass" aria-label="Compass: tap to face north"><span class="k-needle"></span></button>
           <button id="planStyleBtn" type="button" class="k-fab-sm"><i class="bi bi-layers-fill"></i></button>
+          <button id="planExpandBtn" type="button" class="k-fab-sm" data-i18n-aria="map.expand" aria-label="Full-screen map"><i class="bi bi-arrows-fullscreen"></i></button>
         </div>
         <div id="pinBar" class="k-pinbar d-none" role="dialog" aria-live="polite">
           <div class="fw-semibold" id="pinBarTitle"></div>
@@ -270,11 +271,13 @@
 <script src="js/data/fares.js"></script>
 <script src="js/data/transit.js"></script>
 <script src="js/data/guide.js"></script>
+<script src="js/data/barangays.js"></script>
 <script src="js/lib/plan-cards.js"></script>
 <script src="js/lib/plan-view.js"></script>
 <script src="js/lib/api.js"></script>
 <script src="js/lib/map.js"></script>
 <script src="js/lib/sensors.js"></script>
+<script src="js/lib/typeahead.js"></script>
 <script src="js/state.js"></script>
 <script src="js/lib/fare-estimate.js"></script>
 <script src="js/lib/route.js"></script>

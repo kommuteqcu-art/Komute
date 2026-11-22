@@ -59,7 +59,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/health") {
       return json(response, 200, {
         ok: true, version: "15", webFolder: WEB_DIR || "NOT FOUND",
-        placeSearch: "Nominatim", aiConfigured: Boolean(GEMINI_KEY), aiModels: MODELS,
+        placeSearch: "Nominatim", autocomplete: GOOGLE_PLACES_KEY ? "Google Places" : GEOAPIFY_KEY ? "Geoapify" : "Photon (OpenStreetMap)", aiConfigured: PROVIDERS.length > 0, aiProviders: PROVIDERS.map(providerName), aiModels: MODELS,
         mapsGroundingRequested: MAPS_GROUNDING, lastAiResult, redditConfigured: redditConfigured()
       });
     }
@@ -72,6 +72,8 @@ const server = http.createServer(async (request, response) => {
     const body = await readJson(request);
     if (url.pathname === "/api/places") return await placesEndpoint(response, body);
     if (url.pathname === "/api/reverse") return await reverseEndpoint(response, body);
+    if (url.pathname === "/api/autocomplete") return await autocompleteEndpoint(response, body);
+    if (url.pathname === "/api/place-details") return await placeDetailsEndpoint(response, body);
     if (url.pathname === "/api/commute-plan") return await commutePlanEndpoint(response, body);
     if (url.pathname === "/api/routes") {
       return json(response, 410, { error: "Use /api/commute-plan for the AI commute plan." });
@@ -84,7 +86,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 if (process.argv.includes("--check-ai")) {
-  checkAi().then((r) => { console.log(JSON.stringify(r, null, 2)); process.exit(r.ok ? 0 : 1); });
+  setImmediate(() => checkAi().then((r) => { console.log(JSON.stringify(r, null, 2)); process.exit(r.ok ? 0 : 1); }));
 } else {
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`\nKomute is running. Open http://localhost:${PORT} in your browser.`);
@@ -92,6 +94,7 @@ if (process.argv.includes("--check-ai")) {
     console.log(`Website folder: ${WEB_DIR || "NOT FOUND. Put the 'web' folder next to the 'backend' folder."}`);
     console.log(GEMINI_KEY ? `Gemini key: loaded (${GEMINI_KEY.length} characters, starts with "${GEMINI_KEY.slice(0, 3)}")` : "Gemini key: NONE  <-- " + missingKeyMessage());
     console.log(`Gemini models (in order): ${MODELS.join(", ")}`);
+    console.log(`AI services (tried in this order): ${PROVIDERS.length ? PROVIDERS.map(providerName).join(" -> ") : "NONE"}`);
     console.log(`Test the AI any time: open http://localhost:${PORT}/api/ai-status\n`);
   });
 }
@@ -153,15 +156,159 @@ async function searchNominatim(query, near) {
   return places;
 }
 
+// ---------- Type-ahead suggestions (search as you type) ----------
+// Free by default: Photon (OpenStreetMap, made for search-as-you-type, no key).
+// Optional, better house-number coverage: GEOAPIFY_API_KEY (free 3,000/day) or GOOGLE_PLACES_API_KEY (needs Google billing).
+const PHOTON_URL = (process.env.PHOTON_URL || "https://photon.komoot.io").replace(/\/$/, "");
+const GEOAPIFY_KEY = (process.env.GEOAPIFY_API_KEY || "").trim();
+const GOOGLE_PLACES_KEY = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
+const OTHER_CITIES = /\b(manila|caloocan|marikina|pasig|san juan|mandaluyong|valenzuela|malabon|navotas|makati|rizal|bulacan|san mateo|rodriguez)\b/i;
+const acCache = new Map();
+
+async function autocompleteEndpoint(response, body) {
+  const query = cleanText(body.query, 120);
+  if (query.length < 2) return json(response, 200, { suggestions: [] });
+  const near = validCoordinate(body.near) ? { latitude: Number(body.near.latitude), longitude: Number(body.near.longitude) } : null;
+  const key = `${query.toLowerCase()}|${near ? near.latitude.toFixed(2) + "," + near.longitude.toFixed(2) : ""}`;
+  const hit = acCache.get(key);
+  if (hit && Date.now() - hit.at < 30 * 60 * 1000) return json(response, 200, { suggestions: hit.value, provider: hit.provider });
+
+  const providers = [GOOGLE_PLACES_KEY && ["google", googleAutocomplete], GEOAPIFY_KEY && ["geoapify", geoapifyAutocomplete], ["photon", photonAutocomplete]].filter(Boolean);
+  let list = [], used = "none";
+  for (const [name, fn] of providers) {
+    try {
+      list = await fn(query, near, body.sessionToken);
+      used = name;
+      if (list.length) break;
+    } catch (e) { console.warn(`Autocomplete via ${name} failed: ${e.message}`); }
+  }
+  list = withHouseNumber(query, list).slice(0, 8);
+  acCache.set(key, { at: Date.now(), value: list, provider: used });
+  if (acCache.size > 2000) acCache.delete(acCache.keys().next().value);
+  return json(response, 200, { suggestions: list, provider: used });
+}
+
+// When you type a house number ("123 Maginhawa") and the map only knows the street,
+// keep your number in the label and put the pin on the street. You can drag the pin to the exact house.
+function withHouseNumber(query, list) {
+  const m = query.match(/^\s*(\d+[a-zA-Z]?(?:-\d+)?)\s+(.+)/);
+  if (!m) return list;
+  return list.map((s) => (s.kind === "street" && !/^\d/.test(s.name)
+    ? { ...s, name: `${m[1]} ${s.name}`, label: `${m[1]} ${s.label}`, approx: true } : s));
+}
+
+function inQC(fields, lat, lon) {
+  const text = fields.filter(Boolean).join(", ");
+  if (/quezon city/i.test(text)) return true;
+  if (OTHER_CITIES.test(text)) return false;
+  return lat >= SERVICE_AREA.south && lat <= SERVICE_AREA.north && lon >= SERVICE_AREA.west && lon <= SERVICE_AREA.east;
+}
+
+function kindOf(type) {
+  type = String(type || "").toLowerCase();
+  if (/house|building|amenity|shop|office|school|hospital|mall|poi|establishment|tourism|leisure|station|stop/.test(type)) return "place";
+  if (/street|road|highway|route|primary|secondary|residential|tertiary|trunk/.test(type)) return "street";
+  if (/district|suburb|locality|neighbourhood|quarter|sublocality|village|barangay/.test(type)) return "area";
+  return "place";
+}
+
+async function photonAutocomplete(query, near) {
+  const url = new URL(PHOTON_URL + "/api/");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", "15");
+  url.searchParams.set("lang", "en");
+  url.searchParams.set("bbox", `${SERVICE_AREA.west},${SERVICE_AREA.south},${SERVICE_AREA.east},${SERVICE_AREA.north}`);
+  const bias = near || { latitude: 14.6507, longitude: 121.0494 };
+  url.searchParams.set("lat", String(bias.latitude));
+  url.searchParams.set("lon", String(bias.longitude));
+  const res = await fetch(url, { headers: { "User-Agent": NOMINATIM_USER_AGENT, Accept: "application/json" }, signal: AbortSignal.timeout(6000) });
+  if (!res.ok) throw new Error("Photon HTTP " + res.status);
+  const data = await res.json();
+  const seen = new Set();
+  return (data.features || []).map((f) => {
+    const p = f.properties || {}, [lon, lat] = f.geometry?.coordinates || [];
+    const houseLine = p.housenumber ? `${p.housenumber} ${p.street || ""}`.trim() : "";
+    const name = p.name || houseLine || p.street || "";
+    const area = [p.name && p.street && p.name !== p.street ? (p.housenumber ? houseLine : p.street) : "", p.district || p.locality, "Quezon City"]
+      .filter((x, i, a) => x && a.indexOf(x) === i && x !== name);
+    return {
+      id: `ph:${p.osm_type || ""}${p.osm_id || lat + "," + lon}`, name, sub: area.join(", "),
+      label: [name, ...area].join(", "), kind: kindOf(p.housenumber ? "house" : p.type === "street" ? "street" : p.osm_key === "highway" ? "street" : p.type === "district" || p.type === "locality" ? "district" : p.osm_value || p.type),
+      location: { latitude: lat, longitude: lon }, keep: inQC([p.city, p.county, p.district, p.locality, p.state], lat, lon)
+    };
+  }).filter((s) => s.keep && s.name && Number.isFinite(s.location.latitude) && !seen.has(s.label) && seen.add(s.label))
+    .map(({ keep, ...s }) => s);
+}
+
+async function geoapifyAutocomplete(query, near) {
+  const url = new URL("https://api.geoapify.com/v1/geocode/autocomplete");
+  url.searchParams.set("text", query.toLowerCase().includes("quezon") ? query : query + ", Quezon City");
+  url.searchParams.set("filter", `rect:${SERVICE_AREA.west},${SERVICE_AREA.south},${SERVICE_AREA.east},${SERVICE_AREA.north}`);
+  if (near) url.searchParams.set("bias", `proximity:${near.longitude},${near.latitude}`);
+  url.searchParams.set("limit", "10");
+  url.searchParams.set("lang", "en");
+  url.searchParams.set("format", "json");
+  url.searchParams.set("apiKey", GEOAPIFY_KEY);
+  const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+  if (!res.ok) throw new Error("Geoapify HTTP " + res.status);
+  const data = await res.json();
+  return (data.results || []).filter((r) => inQC([r.city, r.county, r.formatted], r.lat, r.lon)).map((r) => ({
+    id: "ga:" + (r.place_id || r.lat + "," + r.lon), name: r.address_line1 || r.name || r.formatted,
+    sub: r.address_line2 || "", label: r.formatted, kind: kindOf(r.result_type),
+    location: { latitude: r.lat, longitude: r.lon }
+  }));
+}
+
+async function googleAutocomplete(query, near, sessionToken) {
+  const body = {
+    input: query, includedRegionCodes: ["ph"], languageCode: "en",
+    locationRestriction: { rectangle: { low: { latitude: SERVICE_AREA.south, longitude: SERVICE_AREA.west }, high: { latitude: SERVICE_AREA.north, longitude: SERVICE_AREA.east } } }
+  };
+  if (near) body.origin = { latitude: near.latitude, longitude: near.longitude };
+  if (sessionToken) body.sessionToken = cleanText(sessionToken, 64);
+  const res = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": GOOGLE_PLACES_KEY },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(6000)
+  });
+  if (!res.ok) throw new Error("Google Places HTTP " + res.status);
+  const data = await res.json();
+  return (data.suggestions || []).map((s) => s.placePrediction).filter(Boolean)
+    .filter((p) => /quezon city/i.test(p.text?.text || ""))
+    .map((p) => ({
+      id: "gp:" + p.placeId, placeId: p.placeId, name: p.structuredFormat?.mainText?.text || p.text.text,
+      sub: p.structuredFormat?.secondaryText?.text || "", label: p.text.text, kind: kindOf((p.types || []).join(" ")), location: null
+    }));
+}
+
+// Google suggestions have no coordinates; this looks them up when you pick one.
+async function placeDetailsEndpoint(response, body) {
+  const id = cleanText(body.placeId, 300);
+  if (!GOOGLE_PLACES_KEY || !id) return json(response, 400, { error: "Place details are not available." });
+  const url = new URL(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`);
+  if (body.sessionToken) url.searchParams.set("sessionToken", cleanText(body.sessionToken, 64));
+  const res = await fetch(url, {
+    headers: { "X-Goog-Api-Key": GOOGLE_PLACES_KEY, "X-Goog-FieldMask": "location,formattedAddress,displayName" },
+    signal: AbortSignal.timeout(8000)
+  });
+  const data = await safeJson(res);
+  if (!res.ok || !data.location) return json(response, 502, { error: "Could not get that place's location." });
+  return json(response, 200, { label: data.formattedAddress, location: { latitude: data.location.latitude, longitude: data.location.longitude } });
+}
+
 async function throttledNominatimFetch(url) {
   const task = nominatimQueue.then(async () => {
     const waitMs = Math.max(0, 1000 - (Date.now() - lastNominatimRequestAt));
     if (waitMs) await delay(waitMs);
     lastNominatimRequestAt = Date.now();
-    const res = await fetch(url, {
-      headers: { "User-Agent": NOMINATIM_USER_AGENT, Accept: "application/json", "Accept-Language": "en" },
-      signal: AbortSignal.timeout(15000)
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: { "User-Agent": NOMINATIM_USER_AGENT, Accept: "application/json", "Accept-Language": "en" },
+        signal: AbortSignal.timeout(15000)
+      });
+    } catch (e) {
+      throw publicError(502, "Place search is not reachable right now. Try again, or tap the map to set the spot.");
+    }
     const data = await safeJson(res);
     if (!res.ok) throw upstreamError("OpenStreetMap place search", data, res.status);
     return data;
@@ -172,9 +319,7 @@ async function throttledNominatimFetch(url) {
 
 // ---------- Commute plan ----------
 async function commutePlanEndpoint(response, body) {
-  if (!GEMINI_KEY) {
-    return json(response, 503, { error: missingKeyMessage() });
-  }
+  if (!PROVIDERS.length) return json(response, 503, { error: missingKeyMessage() });
   const origin = parseEndpoint(body.origin, "starting point");
   const destination = parseEndpoint(body.destination, "destination");
   const beginnerMode = body.beginnerMode !== false;
@@ -275,10 +420,55 @@ const PLAN_SCHEMA = {
 // ---------- Gemini ----------
 const TRANSIENT = [500, 502, 503, 504];
 
+// ---------- AI providers ----------
+// Komute can use several AI services. It tries them in order and uses the first one that answers:
+//   gemini      (GEMINI_API_KEY)      Google AI Studio, free tier
+//   groq        (GROQ_API_KEY)        console.groq.com, free tier, very fast
+//   openrouter  (OPENROUTER_API_KEY)  openrouter.ai, free models
+// AI_PROVIDER=auto (default) means: every provider that has a key, in the order above.
+// AI_PROVIDER=groq (or openrouter, gemini) puts that one first.
+const COMPAT = {
+  groq: { name: "Groq", key: process.env.GROQ_API_KEY, base: process.env.GROQ_API_BASE || "https://api.groq.com/openai/v1",
+    models: unique([...splitList(process.env.GROQ_MODEL), "openai/gpt-oss-120b", "openai/gpt-oss-20b"]),
+    prefer: [/gpt-oss-120b/, /gpt-oss/, /llama-4-maverick/, /llama-4/, /qwen/, /kimi/, /llama/] },
+  openrouter: { name: "OpenRouter", key: process.env.OPENROUTER_API_KEY, base: process.env.OPENROUTER_API_BASE || "https://openrouter.ai/api/v1",
+    models: unique([...splitList(process.env.OPENROUTER_MODEL), "openrouter/free"]), prefer: [/:free$/] }
+};
+const PROVIDERS = (() => {
+  const all = ["gemini", "groq", "openrouter"].filter((p) => (p === "gemini" ? GEMINI_KEY : (COMPAT[p].key || "").trim()));
+  const first = (process.env.AI_PROVIDER || "auto").toLowerCase();
+  return all.includes(first) ? [first, ...all.filter((p) => p !== first)] : all;
+})();
+const providerName = (p) => (p === "gemini" ? "Gemini" : COMPAT[p].name);
+
+async function generatePlan(prompt, location, { maxMs = 115000 } = {}) {
+  const deadline = Date.now() + maxMs;
+  const problems = [];
+  for (let i = 0; i < PROVIDERS.length; i++) {
+    const p = PROVIDERS[i];
+    // leave time for the backups when there are any
+    const budget = i < PROVIDERS.length - 1 ? Math.min(deadline - Date.now(), 55000) : deadline - Date.now();
+    if (budget < 5000) break;
+    try {
+      const r = p === "gemini" ? await generateGemini(prompt, location, budget) : await generateCompat(p, prompt, budget);
+      lastAiResult = { ok: true, provider: providerName(p), model: r.model, at: new Date().toISOString() };
+      return r;
+    } catch (e) {
+      const msg = e.publicMessage || e.message;
+      console.warn(`${providerName(p)} failed: ${msg}${i < PROVIDERS.length - 1 ? " Trying " + providerName(PROVIDERS[i + 1]) + "..." : ""}`);
+      problems.push({ provider: providerName(p), msg, status: e.statusCode });
+    }
+  }
+  lastAiResult = { ok: false, problems, at: new Date().toISOString() };
+  if (problems.length === 1) throw publicError(problems[0].status || 502, problems[0].msg);
+  throw publicError(503, problems.map((x) => (x.msg.startsWith(x.provider) ? x.msg : `${x.provider}: ${x.msg}`)).join("  |  ") || "No AI service answered.");
+}
+
+// ---------- Gemini ----------
 // Tries each model. For each model it tries a few request "shapes", from the richest
 // (Maps grounding, JSON schema, low thinking) down to a plain request, so a model or key
 // that does not support a feature still answers.
-async function generatePlan(prompt, location, { maxMs = 110000 } = {}) {
+async function generateGemini(prompt, location, maxMs) {
   const deadline = Date.now() + maxMs;
   const variants = uniqueBy([
     { maps: MAPS_GROUNDING, schema: !MAPS_GROUNDING, thinking: true },
@@ -289,16 +479,15 @@ async function generatePlan(prompt, location, { maxMs = 110000 } = {}) {
 
   models: for (const model of MODELS) {
     for (const variant of variants) {
-      if (Date.now() > deadline) break models;
+      if (Date.now() + 4000 > deadline) break models;
       let res;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 2; attempt++) {
         res = await callGemini(model, prompt, variant, location, deadline);
-        if (res.ok || !TRANSIENT.includes(res.status)) break;
-        console.warn(`Gemini "${model}" is busy (${res.status}), attempt ${attempt + 1} of 3.`);
-        if (attempt < 2 && Date.now() + 3000 < deadline) await delay(1500 * (attempt + 1)); else break;
+        // retry once only for a real "busy" answer, not for timeouts or network problems
+        if (res.ok || !TRANSIENT.includes(res.status) || res.network || res.timeout) break;
+        console.warn(`Gemini "${model}" is busy (${res.status}), retrying once.`);
+        if (Date.now() + 6000 < deadline) await delay(1500); else break;
       }
-      // A key from AI Studio and one from Vertex AI express mode both start with "AQ.".
-      // If the normal endpoint rejects the key, try the Vertex AI endpoint once.
       if (isKeyError(res) && !useVertex && process.env.GEMINI_API_BASE === undefined) {
         console.warn("The Gemini API rejected the key. Trying the Vertex AI express endpoint with the same key...");
         useVertex = true;
@@ -308,21 +497,21 @@ async function generatePlan(prompt, location, { maxMs = 110000 } = {}) {
       last = { model, ...res };
       if (res.ok) {
         const text = extractText(res.data);
-        if (text) { lastAiResult = { ok: true, model, at: new Date().toISOString() }; return { text, data: res.data, model }; }
+        if (text) return { text, data: res.data, model };
         const reason = res.data?.candidates?.[0]?.finishReason || res.data?.promptFeedback?.blockReason || "EMPTY";
         console.warn(`Gemini "${model}" returned no text (${reason}).`);
         last = { model, ok: false, status: 200, data: res.data, empty: reason };
-        if (reason === "MAX_TOKENS") continue; // try a lighter request shape
+        if (reason === "MAX_TOKENS") continue;
         continue models;
       }
-      if (isKeyError(res)) break models; // a bad key fails on every model
+      if (isKeyError(res)) break models;     // a bad key fails on every model
+      if (res.network) break models;         // no connection to Google: other models will fail too
       console.warn(`Gemini "${model}" failed (${res.status}) with ${describeVariant(variant)}: ${errorDetail(res.data)}`);
-      if (res.status === 400) continue; // unsupported feature: try a simpler request
-      if ((res.status === 403 || res.status === 429) && variant.maps) continue; // Maps grounding quota/permission
-      continue models; // 404 retired model, 429 quota, 5xx busy: next model
+      if (res.status === 400) continue;
+      if ((res.status === 403 || res.status === 429) && variant.maps) continue;
+      continue models;
     }
   }
-  lastAiResult = { ok: false, status: last?.status, detail: last ? errorDetail(last.data) : "no attempt", at: new Date().toISOString() };
   throw friendlyAiError(last);
 }
 
@@ -341,17 +530,24 @@ async function callGemini(model, prompt, variant, location, deadline) {
   const url = useVertex
     ? `https://aiplatform.googleapis.com/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent`
     : `${GEMINI_API_BASE}/models/${encodeURIComponent(model)}:generateContent`;
+  return httpJson(url, { "x-goog-api-key": GEMINI_KEY }, body, deadline, `Gemini "${model}"`);
+}
+
+// POST JSON with a timeout. Marks network problems and timeouts so they can be explained.
+async function httpJson(url, headers, body, deadline, label) {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI_KEY },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(Math.max(5000, Math.min(60000, deadline - Date.now())))
+      signal: AbortSignal.timeout(Math.max(4000, Math.min(45000, deadline - Date.now())))
     });
     return { ok: res.ok, status: res.status, data: await safeJson(res) };
   } catch (error) {
-    console.warn(`Gemini request to "${model}" failed: ${error.message}`);
-    return { ok: false, status: 504, data: { message: error.message } };
+    const timeout = error.name === "TimeoutError" || error.name === "AbortError";
+    const code = error.cause?.code || error.cause?.message || "";
+    console.warn(`${label} request failed: ${timeout ? "took too long" : error.message} ${code}`);
+    return { ok: false, status: 504, timeout, network: !timeout, data: { message: timeout ? "The AI took too long to answer." : `${error.message}${code ? " (" + code + ")" : ""}` } };
   }
 }
 
@@ -370,27 +566,94 @@ function isKeyError(res) {
     res.status === 401;
 }
 
+function networkHelp(detail) {
+  const tls = /certificate|cert|ssl|tls|SELF_SIGNED|UNABLE_TO/i.test(detail);
+  return tls
+    ? `this computer blocks secure connections from Node.js (${detail}). Antivirus "HTTPS/web scanning" is the usual cause: turn it off or add node.exe as an exception, then restart the server.`
+    : `this computer cannot reach the AI service (${detail}). Check the internet connection, and allow node.exe in Windows Firewall or your antivirus.`;
+}
+
 function friendlyAiError(last) {
-  if (!last) return publicError(503, "The AI could not be reached. Please try again.");
+  if (!last) return publicError(503, "The AI took too long. Please try again.");
   if (isKeyError(last)) {
     return publicError(502, "Gemini rejected the API key. Create a new key at https://aistudio.google.com/apikey, paste it after GEMINI_API_KEY= in backend/.env (no spaces or quotes), then restart the server.");
   }
+  if (last.network) return publicError(502, "Gemini: " + networkHelp(errorDetail(last.data)).replace(/^this/, "This"));
+  if (last.timeout) return publicError(504, "Gemini took too long to answer. Please try again.");
   if (last.status === 403) return publicError(502, `Gemini refused the request (403): ${errorDetail(last.data)}. Check that the key is allowed to use the Gemini API.`);
   if (last.status === 404) return publicError(502, "None of the Gemini models in backend/.env are available to this key. Set GEMINI_MODEL=gemini-3.8-flash and restart.");
-  if (last.status === 429) return publicError(503, "The free Gemini quota is used up for now. Wait a minute (or until tomorrow for the daily limit) and try again.");
-  if (TRANSIENT.includes(last.status)) return publicError(503, "The AI service is very busy right now. Please try again in a minute.");
+  if (last.status === 429) return publicError(503, `The free Gemini quota is used up for now (${errorDetail(last.data)}). Wait a minute (or until tomorrow for the daily limit), or add a free Groq key as a backup.`);
+  if (TRANSIENT.includes(last.status)) return publicError(503, `Gemini is overloaded right now (${last.status}: ${errorDetail(last.data)}). Add a free Groq key in backend/.env as a backup, or try again in a minute.`);
   if (last.empty) return publicError(502, `Gemini did not return a plan (${last.empty}). Please try again.`);
   return publicError(502, `Gemini error (${last.status}): ${errorDetail(last.data)}`);
 }
 
+// ---------- OpenAI-compatible providers (Groq, OpenRouter) ----------
+const discovered = {};
+async function compatModels(id) {
+  const c = COMPAT[id];
+  if (discovered[id]) return discovered[id];
+  let list = [];
+  try {
+    const res = await fetch(`${c.base}/models`, { headers: { Authorization: `Bearer ${c.key.trim()}` }, signal: AbortSignal.timeout(10000) });
+    const data = await safeJson(res);
+    const ids = (data.data || []).map((m) => m.id).filter((m) => !/whisper|guard|tts|orpheus|playai|compound|embed|vision|audio|image/i.test(m));
+    for (const re of c.prefer) ids.filter((m) => re.test(m) && !list.includes(m)).forEach((m) => list.push(m));
+  } catch { /* keep the built-in list */ }
+  return (discovered[id] = unique([...c.models, ...list]).slice(0, 6));
+}
+
+async function generateCompat(id, prompt, maxMs) {
+  const c = COMPAT[id];
+  const deadline = Date.now() + maxMs;
+  let models = c.models, last = null, discoveredOnce = false;
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    for (const json of [true, false]) {
+      if (Date.now() + 4000 > deadline) break;
+      const body = {
+        model, temperature: 0.3, max_tokens: 6000,
+        messages: [
+          { role: "system", content: "You are Komute's commute planner. Reply with one valid JSON object only." },
+          { role: "user", content: prompt }
+        ]
+      };
+      if (json) body.response_format = { type: "json_object" };
+      const res = await httpJson(`${c.base}/chat/completions`, { Authorization: `Bearer ${c.key.trim()}`, "HTTP-Referer": "http://localhost", "X-Title": "Komute" },
+        body, deadline, `${c.name} "${model}"`);
+      last = { model, ...res };
+      if (res.ok) {
+        const text = String(res.data?.choices?.[0]?.message?.content || "").trim();
+        if (text) return { text, data: {}, model: `${c.name}: ${model}` };
+        last = { ...last, ok: false, empty: res.data?.choices?.[0]?.finish_reason || "EMPTY" };
+        break;
+      }
+      if (res.status === 401 || res.status === 403) throw publicError(502, `${c.name} rejected the API key. Check ${id.toUpperCase()}_API_KEY in backend/.env.`);
+      if (res.network) throw publicError(502, networkHelp(errorDetail(res.data)));
+      console.warn(`${c.name} "${model}" failed (${res.status}): ${errorDetail(res.data)}`);
+      if (res.status === 400 && json && !/model/i.test(errorDetail(res.data))) continue; // try without JSON mode
+      break; // next model
+    }
+    // A retired model name: ask the service which models exist now, once.
+    if (i === models.length - 1 && !discoveredOnce) {
+      discoveredOnce = true;
+      const more = (await compatModels(id)).filter((m) => !models.includes(m));
+      models = [...models, ...more];
+    }
+  }
+  if (last?.status === 429) throw publicError(503, `${c.name} free limit reached for now. Wait a minute and try again.`);
+  if (last?.timeout) throw publicError(504, `${c.name} took too long to answer.`);
+  throw publicError(502, `${c.name} error (${last?.status ?? "?"}): ${last ? errorDetail(last.data) : "no answer"}`);
+}
+
 async function checkAi() {
-  if (!GEMINI_KEY) return { ok: false, problem: missingKeyMessage(), envFile: ENV_FILE };
+  if (!PROVIDERS.length) return { ok: false, problem: missingKeyMessage(), envFile: ENV_FILE };
   const started = Date.now();
   try {
-    const r = await generatePlan('Reply with this JSON only: {"summary":"Komute AI is working","options":[]}', null, { maxMs: 60000 });
-    return { ok: true, model: r.model, reply: r.text.slice(0, 120), ms: Date.now() - started, endpoint: useVertex ? "Vertex AI express" : GEMINI_API_BASE };
+    const r = await generatePlan('Reply with this JSON only: {"summary":"Komute AI is working","options":[]}', null, { maxMs: 90000 });
+    return { ok: true, model: r.model, reply: r.text.slice(0, 120), ms: Date.now() - started, providersInOrder: PROVIDERS.map(providerName) };
   } catch (e) {
-    return { ok: false, problem: e.publicMessage || e.message, lastAiResult, modelsTried: MODELS };
+    return { ok: false, problem: e.publicMessage || e.message, providersInOrder: PROVIDERS.map(providerName), geminiModels: MODELS };
   }
 }
 
@@ -627,5 +890,5 @@ function missingKeyMessage() {
   if (!ENV_FILE) {
     return `The AI is not set up yet: no .env file was found in ${HERE}. Copy your .env file into that folder (or rename .env.example to .env), put your Gemini key after GEMINI_API_KEY=, then restart the server.`;
   }
-  return `The AI is not set up yet: ${ENV_FILE} was found, but GEMINI_API_KEY in it is empty. Open that file, paste your key right after GEMINI_API_KEY= (no spaces, no quotes), save, then close and restart the server.`;
+  return `The AI is not set up yet: ${ENV_FILE} was found, but it has no AI key. Open that file, paste a key right after GEMINI_API_KEY= (or GROQ_API_KEY=), with no spaces or quotes, save, then close and restart the server.`;
 }

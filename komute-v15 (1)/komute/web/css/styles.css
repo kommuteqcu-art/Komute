@@ -321,3 +321,32 @@ body.k-navigating #tripMap.k-map-full { border-radius: 0 !important; border: 0 !
 #btnNavVoice[aria-pressed="true"] { background: var(--k-green); color: #fff; border-color: var(--k-green); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---- Search as you type ---- */
+.k-sugg mark { background: #fff1b8; padding: 0; color: inherit; font-weight: 800; }
+.k-sugg.active { background: var(--k-mint); color: var(--k-ink); border-color: var(--k-outline); }
+.k-sugg i { flex: none; width: 1.2rem; text-align: center; }
+.k-sugg .bi-houses, .k-sugg .bi-signpost-2 { color: #7c3aed; } .k-sugg .bi-signpost { color: #b45309; }
+.k-sugg .bi-star-fill { color: #b98900; } .k-sugg .bi-clock-history { color: var(--k-muted); } .k-sugg .bi-building { color: var(--k-green); }
+.k-sugg .k-approx { color: #8a6500 !important; }
+.k-sugg-loading, .k-sugg-foot { font-size: .85rem; color: var(--k-muted); display: flex; gap: .5rem; align-items: center; }
+.k-trip-fields .k-sugglist { position: relative; z-index: 20; max-height: 60vh; overflow-y: auto; }
+
+/* ---- Map: tap popup, full-screen map ---- */
+.k-pop { font-family: var(--bs-body-font-family); min-width: 210px; }
+.k-pop-addr { font-weight: 700; margin-bottom: .5rem; padding-right: 1rem; font-size: .95rem; }
+.k-pop-btns { display: flex; gap: .4rem; }
+.k-pop-btns .btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: .35rem; white-space: nowrap; min-height: 38px; }
+.maplibregl-popup-content { border-radius: 14px !important; padding: .8rem .9rem !important; box-shadow: 0 4px 18px rgba(0,0,0,.25) !important; }
+.maplibregl-popup-close-button { font-size: 1.2rem; width: 28px; height: 28px; }
+.k-pin { cursor: grab; }
+body.k-mapfull { overflow: hidden; }
+body.k-mapfull #planMapWrap { position: fixed; inset: 0; z-index: 1060; background: #fff; }
+body.k-mapfull #planMap { height: 100% !important; border-radius: 0; border: 0; }
+body.k-mapfull .k-tabbar { display: none; }
+body.k-mapfull .k-mapbtns { top: calc(.6rem + env(safe-area-inset-top)); }
+body.k-mapfull .k-pinbar { bottom: calc(1rem + env(safe-area-inset-bottom)); }
+/* While typing on a phone: room for the list, no floating button over it */
+body.k-typing { padding-bottom: 70vh; }
+body.k-typing .k-findbar { position: static !important; box-shadow: none !important; }
+@media (max-width: 767.98px) { body.k-typing .k-tabbar { display: none; } }
