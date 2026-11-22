@@ -77,6 +77,7 @@
     "ride.title": "Before you ride", "ride.c1": "Check the vehicle’s route sign matches your plan.", "ride.c2": "Ask the driver or conductor for the current fare.",
     "ride.c3": "Carry small bills or coins.", "ride.c4": "Tell someone your route if the trip is new to you.",
 
+    "plan.unreadable": "The AI's answer came back incomplete. Please try again.",
     "plan.why": "Why this option", "plan.check": "Check before you go", "plan.tips": "Tips for first-timers", "plan.checks": "Important checks",
     "tag.cheapest": "Cheapest", "tag.fastest": "Fastest", "tag.easiest": "Easiest", "tag.fewest": "Fewest transfers",
     "step.start": "Start", "step.walk": "Walk", "step.ride": "Ride", "step.transfer": "Transfer", "step.getoff": "Get off", "step.arrive": "Arrive",
@@ -198,6 +199,7 @@
     "ride.title": "Bago sumakay", "ride.c1": "Tingnan kung tugma ang karatula ng sasakyan sa plano mo.", "ride.c2": "Itanong sa driver o konduktor ang kasalukuyang pamasahe.",
     "ride.c3": "Magdala ng barya o maliit na pera.", "ride.c4": "Sabihan ang isang tao ng ruta mo kung bago sa iyo ang biyahe.",
 
+    "plan.unreadable": "Kulang ang sagot ng AI. Pakisubukan ulit.",
     "plan.why": "Bakit ito", "plan.check": "Siguraduhin bago umalis", "plan.tips": "Tips para sa first-timer", "plan.checks": "Mahahalagang dapat i-check",
     "tag.cheapest": "Pinakamura", "tag.fastest": "Pinakamabilis", "tag.easiest": "Pinakamadali", "tag.fewest": "Kaunting lipat",
     "step.start": "Simula", "step.walk": "Lakad", "step.ride": "Sakay", "step.transfer": "Lipat", "step.getoff": "Baba", "step.arrive": "Dating",
