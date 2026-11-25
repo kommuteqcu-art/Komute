@@ -20,3 +20,19 @@ services:
         value: "false"
       - key: AI_PROVIDER
         value: auto
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: PAYMONGO_SECRET_KEY
+        sync: false
+      - key: PAY_METHOD_NAME
+        sync: false
+      - key: PAY_ACCOUNT_NAME
+        sync: false
+      - key: PAY_ACCOUNT_NUMBER
+        sync: false
+      - key: PAYMENT_ADMIN_KEY
+        sync: false
