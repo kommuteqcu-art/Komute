@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#004d40">
+<script>
+  // Theme before anything is drawn (no white flash): "light", "dark", or "system" (default)
+  (function () {
+    var m = "system";
+    try { m = JSON.parse(localStorage.getItem("komute.theme")) || "system"; } catch (e) {}
+    var dark = m === "dark" || (m !== "light" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.setAttribute("data-bs-theme", dark ? "dark" : "light");
+  })();
+</script>
+<meta name="description" content="Komute: step-by-step commute guide for Quezon City. Where to ride, what sign to look for, where to get off, and fares.">
+<title>Komute: Quezon City commute guide</title>
+<link rel="icon" type="image/png" href="assets/icon-192.png?v=3">
+<link rel="apple-touch-icon" href="assets/icon-192.png?v=3">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+<link href="css/styles.css?v=14" rel="stylesheet">
+</head>
+<body data-view="plan">
+<a class="visually-hidden-focusable k-skip" href="#main" data-i18n="a11y.skip">Skip to content</a>
+<header class="k-header">
+  <div class="container py-2 d-flex align-items-center justify-content-between gap-2">
+    <a class="k-brand" href="#plan"><img src="assets/logo-icon.png?v=3" alt="" width="38" height="38"> Komute</a>
+    <nav aria-label="Main" class="d-none d-md-block"><ul class="nav k-nav">
+      <li class="nav-item"><a class="nav-link" data-nav="plan" href="#plan"><i class="bi bi-signpost-2"></i><span data-i18n="nav.plan">Plan</span></a></li>
+      <li class="nav-item"><a class="nav-link" data-nav="saved" href="#saved"><i class="bi bi-bookmark-heart"></i><span data-i18n="nav.saved">Saved</span></a></li>
+      <li class="nav-item"><a class="nav-link" data-nav="fares" href="#fares"><i class="bi bi-cash-coin"></i><span data-i18n="nav.fares">Fares</span></a></li>
+      <li class="nav-item"><a class="nav-link" data-nav="guide" href="#guide"><i class="bi bi-book"></i><span data-i18n="nav.guide">Guide</span></a></li>
+    </ul></nav>
+    <div class="d-flex align-items-center gap-2">
+    <button type="button" id="acctBtn" class="k-acct-btn d-none" aria-haspopup="dialog"><i class="bi bi-person-circle"></i><span>Sign in</span></button>
+    <!-- Theme: each tap switches Light -> Dark -> System (follows the phone or computer) -> Light -->
+    <button type="button" id="themeBtn" class="k-theme-btn" data-i18n-aria="theme.label" aria-label="Theme">
+      <i id="themeIcon" class="bi bi-circle-half"></i>
+    </button>
+    <div class="k-lang" role="group" data-i18n-aria="lang.label" aria-label="Language">
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang="tl" aria-pressed="false">TL</button>
+    </div>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="container py-3">
+
+<!-- ============ PLAN ============ -->
+<section id="view-plan">
+  <p class="k-tagline" data-i18n="home.tagline">Quezon City commute helper</p>
+  <h1 class="k-title mb-3" data-i18n="home.title">Know how to get there before you go</h1>
+
+  <div id="welcome" class="k-welcome mb-3">
+    <div class="d-flex justify-content-between align-items-start gap-2">
+      <strong data-i18n="welcome.title">New here? It takes 3 steps.</strong>
+      <button id="btnWelcomeClose" type="button" class="btn-close" data-i18n-aria="welcome.hide" aria-label="Hide this tip"></button>
+    </div>
+    <ol class="mb-1"><li data-i18n="welcome.s1">Say where you are starting.</li><li data-i18n="welcome.s2">Say where you are going.</li><li data-i18n="welcome.s3">Press “Get my commute guide”.</li></ol>
+    <div class="d-flex flex-wrap gap-2 align-items-center"><button type="button" class="btn btn-primary btn-sm" data-tour-start><i class="bi bi-play-circle"></i> <span data-i18n="welcome.tour">Show me around</span></button>
+    <a href="#guide" class="small" data-i18n="welcome.more">Read the full guide</a></div>
+  </div>
+
+  <div class="row g-3 g-lg-4">
+    <div class="col-lg-5">
+      <div class="k-card k-form">
+        <!-- Trip box: A and B like Google Maps -->
+        <div class="k-trip">
+          <div class="k-trip-rail" aria-hidden="true"><span class="k-dotmini a"></span><span class="k-trip-line"></span><span class="k-dotmini b"></span></div>
+          <div class="k-trip-fields">
+            <label class="k-label" for="origin"><span class="k-step">1</span> <span data-i18n="home.from">Where are you starting?</span></label>
+            <div class="k-field">
+              <input id="origin" class="form-control form-control-lg" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.fromPh" placeholder="Type a barangay, street, or place">
+              <button id="btnClearOrigin" class="k-ib-sm" type="button" data-i18n-aria="home.clear" aria-label="Clear"><i class="bi bi-x-circle-fill"></i></button>
+              <button id="btnStarOrigin" class="k-ib-sm" type="button" data-i18n-aria="save.this" aria-label="Save this place"><i class="bi bi-star"></i></button>
+            </div>
+            <div class="k-tools">
+              <button id="btnLocate" type="button" class="k-tool"><i class="bi bi-crosshair"></i><span data-i18n="home.myLoc">My location</span></button>
+              <button id="btnPinStart" type="button" class="k-tool" aria-pressed="false"><i class="bi bi-pin-map-fill"></i><span data-i18n="home.pin">Pin on map</span></button>
+              <button id="btnPickStart" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
+            </div>
+            <div id="quickStart" class="k-chips"></div>
+            <div id="originSuggestions" class="list-group k-sugglist" aria-live="polite"></div>
+
+            <button id="btnSwapHome" type="button" class="k-swap" data-i18n-aria="home.swap" aria-label="Swap start and destination"><i class="bi bi-arrow-down-up"></i></button>
+
+            <label class="k-label mt-3" for="destination"><span class="k-step">2</span> <span data-i18n="home.to">Where are you going?</span></label>
+            <div class="k-field">
+              <input id="destination" class="form-control form-control-lg" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.toPh" placeholder="Example: SM North EDSA">
+              <button id="btnClearDest" class="k-ib-sm" type="button" data-i18n-aria="home.clear" aria-label="Clear"><i class="bi bi-x-circle-fill"></i></button>
+              <button id="btnStarDest" class="k-ib-sm" type="button" data-i18n-aria="save.this" aria-label="Save this place"><i class="bi bi-star"></i></button>
+            </div>
+            <div class="k-tools">
+              <button id="btnPin" type="button" class="k-tool" aria-pressed="false"><i class="bi bi-pin-map-fill"></i><span data-i18n="home.pin">Pin on map</span></button>
+              <button id="btnPickDest" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
+            </div>
+            <div id="quick" class="k-chips"></div>
+            <div id="suggestions" class="list-group k-sugglist" aria-live="polite"></div>
+          </div>
+        </div>
+        <div id="placeStatus" class="k-hint" role="status" aria-live="polite"></div>
+
+        <div id="recentWrap" class="d-none mt-3">
+          <div class="d-flex justify-content-between align-items-center"><span class="small fw-semibold" data-i18n="home.recent">Recent trips</span>
+            <button id="btnClearRecent" type="button" class="btn btn-link btn-sm p-0" data-i18n="home.clearRecent">Clear</button></div>
+          <div id="recentTrips" class="k-recents"></div>
+        </div>
+
+        <hr>
+        <div class="k-label"><span class="k-step">3</span> <span data-i18n="home.style">Choose your style</span></div>
+        <div class="form-check form-switch k-switch">
+          <input class="form-check-input" type="checkbox" role="switch" id="newCommuter" checked>
+          <label class="form-check-label" for="newCommuter"><strong data-i18n="home.newMode">New commuter mode</strong>
+            <span class="d-block small text-muted" data-i18n="home.newModeSub">Adds simple tips: how to spot the right jeepney, where to ask for help, and what to double-check.</span></label>
+        </div>
+        <div class="k-findbar">
+          <button id="btnFind" class="btn btn-primary btn-lg w-100" type="button" disabled><i class="bi bi-compass"></i> <span data-i18n="home.find">Get my commute guide</span></button>
+          <div class="k-hint text-center" id="findHint"></div>
+          <div id="upgradeBar" class="k-upgrade d-none"><span id="upgradeText"></span>
+            <button type="button" id="upgradeBtn" class="btn btn-sm btn-warning rounded-pill fw-bold"><i class="bi bi-star-fill"></i> <span id="upgradeLabel">Go unlimited</span></button></div>
+        </div>
+        <div id="farePreview"></div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div id="planMapWrap" class="k-mapwrap">
+        <div id="planMap" class="k-map" data-i18n-aria="map.qc" aria-label="Map of Quezon City"></div>
+        <div id="pinOverlay" class="k-centerpin d-none" aria-hidden="true"><svg viewBox="0 0 32 42"><path d="M16 1C7.7 1 1 7.6 1 15.8 1 27 16 41 16 41s15-14 15-25.2C31 7.6 24.3 1 16 1z" fill="currentColor" stroke="#fff" stroke-width="2"/><circle cx="16" cy="16" r="6" fill="#fff"/></svg><span class="k-centerpin-shadow"></span></div>
+        <div class="k-mapbtns">
+          <button id="planCompass" type="button" class="k-fab-sm k-compass" data-i18n-aria="map.compass" aria-label="Compass: tap to face north"><span class="k-needle"></span></button>
+          <button id="planStyleBtn" type="button" class="k-fab-sm"><i class="bi bi-layers-fill"></i></button>
+          <button id="planStreetBtn" type="button" class="k-fab-sm" data-i18n-aria="map.street" data-i18n-title="map.street" aria-label="Street View" title="Street View"><i class="bi bi-person-walking"></i></button>
+          <button id="planTransitBtn" type="button" class="k-fab-sm" aria-pressed="false" data-i18n-aria="map.transit" aria-label="Show train and EDSA Carousel stations"><i class="bi bi-bus-front-fill"></i></button>
+          <button id="planExpandBtn" type="button" class="k-fab-sm" data-i18n-aria="map.expand" aria-label="Full-screen map"><i class="bi bi-arrows-fullscreen"></i></button>
+        </div>
+<div class="k-legend d-none" aria-label="Legend">
+          <div class="fw-bold small mb-1" data-i18n="legend.title">Transit map</div>
+          <div><span class="k-legend-dot" style="background:#1d4ed8"></span><span data-i18n="pt.terminal">Bus terminal</span></div>
+          <div><span class="k-legend-dot" style="background:#0ea5e9"></span><span data-i18n="pt.stop">Bus stop</span></div>
+          <div><span class="k-legend-dot" style="background:#b45309"></span><span data-i18n="pt.jeepney">Jeepney terminal</span></div>
+          <div><span class="k-legend-dot" style="background:#15803d"></span><span data-i18n="pt.tricycle">Tricycle terminal (TODA)</span></div>
+          <div><span class="k-legend-dot" style="background:#9d174d"></span><span data-i18n="pt.uv">UV Express terminal</span></div>
+          <div><span class="k-legend-dot" style="background:#dc2626"></span><span data-i18n="pt.carousel">EDSA Carousel stop</span></div>
+          <div><span class="k-legend-dot" style="background:#2563eb"></span><span data-i18n="pt.train">Train station</span></div>
+          <div class="k-legend-err small text-danger d-none" data-i18n="legend.err">Could not load terminals right now.</div>
+        </div>
+        <div id="pinBar" class="k-pinbar d-none" role="dialog" aria-live="polite">
+          <div class="fw-semibold" id="pinBarTitle"></div>
+          <div class="small text-muted text-truncate" id="pinBarText"></div>
+          <div class="d-flex gap-2 mt-2">
+            <button id="btnPinUse" type="button" class="btn btn-primary flex-grow-1"><i class="bi bi-check2-circle"></i> <span data-i18n="pin.use">Use this spot</span></button>
+            <button id="btnPinCancel" type="button" class="btn btn-outline-secondary" data-i18n="pin.cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+      <p id="mapHint" class="k-hint" data-i18n="map.hint">Drag or pinch the map. Twist with two fingers to rotate; the compass button turns it back to north.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RESULTS ============ -->
+<section id="view-results" class="d-none">
+  <div class="k-tripview">
+    <div class="k-nav-map">
+      <div id="tripMap" class="k-map-full" data-i18n-aria="map.trip" aria-label="Trip map"></div>
+      <div class="k-ftop">
+        <button id="btnBack" class="k-ib" type="button" data-i18n-aria="res.back" aria-label="Back to planner"><i class="bi bi-arrow-left"></i></button>
+        <div class="k-ftop-rows">
+          <div><span class="k-dotmini a"></span><span id="navFrom"></span></div>
+          <div><span class="k-dotmini b"></span><span id="navTo"></span></div>
+        </div>
+        <button id="btnSwap" class="k-ib" type="button" data-i18n-aria="home.swap" aria-label="Swap start and destination"><i class="bi bi-arrow-down-up"></i></button>
+      </div>
+      <div class="k-mapbtns k-mapbtns-trip">
+        <button id="tripCompass" type="button" class="k-fab-sm k-compass" data-i18n-aria="map.compass" aria-label="Compass"><span class="k-needle"></span></button>
+        <button id="btnMyLoc" class="k-fab-sm" type="button" data-i18n-aria="res.myLoc" aria-label="Show my location"><i class="bi bi-crosshair"></i></button>
+        <button id="tripStyleBtn" type="button" class="k-fab-sm"><i class="bi bi-layers-fill"></i></button>
+        <button id="tripStreetBtn" type="button" class="k-fab-sm" data-i18n-aria="map.street" aria-label="Street View" title="Street View"><i class="bi bi-person-walking"></i></button>
+        <button id="tripTransitBtn" type="button" class="k-fab-sm" aria-pressed="false" data-i18n-aria="map.transit" aria-label="Show train and EDSA Carousel stations"><i class="bi bi-bus-front-fill"></i></button>
+      </div>
+<div class="k-legend k-legend-trip d-none" aria-label="Legend">
+          <div class="fw-bold small mb-1" data-i18n="legend.title">Transit map</div>
+          <div><span class="k-legend-dot" style="background:#1d4ed8"></span><span data-i18n="pt.terminal">Bus terminal</span></div>
+          <div><span class="k-legend-dot" style="background:#0ea5e9"></span><span data-i18n="pt.stop">Bus stop</span></div>
+          <div><span class="k-legend-dot" style="background:#b45309"></span><span data-i18n="pt.jeepney">Jeepney terminal</span></div>
+          <div><span class="k-legend-dot" style="background:#15803d"></span><span data-i18n="pt.tricycle">Tricycle terminal (TODA)</span></div>
+          <div><span class="k-legend-dot" style="background:#9d174d"></span><span data-i18n="pt.uv">UV Express terminal</span></div>
+          <div><span class="k-legend-dot" style="background:#dc2626"></span><span data-i18n="pt.carousel">EDSA Carousel stop</span></div>
+          <div><span class="k-legend-dot" style="background:#2563eb"></span><span data-i18n="pt.train">Train station</span></div>
+          <div class="k-legend-err small text-danger d-none" data-i18n="legend.err">Could not load terminals right now.</div>
+        </div>
+    </div>
+    <div class="k-nav-sheet" id="navSheet">
+      <button type="button" class="k-grab" id="btnGrab" data-i18n-aria="res.sheet" aria-label="Show more map"></button>
+      <div class="k-tabs" role="tablist">
+        <button class="k-tab" role="tab" data-mode="commute" aria-selected="true" type="button"><i class="bi bi-train-front"></i><span data-i18n="tab.commute">Commute</span></button>
+        <button class="k-tab" role="tab" data-mode="walk" aria-selected="false" type="button"><i class="bi bi-person-walking"></i><span id="t-walk">…</span></button>
+        <button class="k-tab" role="tab" data-mode="drive" aria-selected="false" type="button"><i class="bi bi-car-front"></i><span id="t-drive">…</span></button>
+        <button class="k-tab" role="tab" data-mode="bike" aria-selected="false" type="button"><i class="bi bi-bicycle"></i><span id="t-bike">…</span></button>
+      </div>
+      <div id="panel-route" class="d-none"></div>
+      <div id="panel-commute" class="pt-3">
+        <div id="dirCompass" class="mb-3"></div>
+        <p id="groundNote" class="small text-muted mb-2"></p>
+        <div id="planBody"></div>
+        <div id="planTools" class="d-flex flex-wrap gap-2 mt-3 d-none">
+          <button id="btnSharePlan" class="btn btn-outline-primary rounded-pill" type="button"><i class="bi bi-share"></i> <span data-i18n="res.share">Share this plan</span></button>
+          <button id="btnAgain" class="btn btn-outline-primary rounded-pill" type="button"><i class="bi bi-arrow-repeat"></i> <span data-i18n="res.again">Make another plan</span></button>
+          <a id="lnkTransit" class="btn btn-outline-primary rounded-pill" target="_blank" rel="noopener noreferrer"><i class="bi bi-google"></i> <span data-i18n="res.transitGoogle">Transit in Google Maps</span></a>
+        </div>
+        <div id="fbRate" class="k-fbrate d-none">
+          <span id="fbRateText" data-i18n="fb.helpful">Was this plan helpful?</span>
+          <button type="button" class="btn btn-sm btn-outline-success rounded-pill" data-fb-quick="up" data-i18n-aria="fb.yes" aria-label="Yes"><i class="bi bi-hand-thumbs-up-fill"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-danger rounded-pill" data-fb-quick="down" data-i18n-aria="fb.no" aria-label="No"><i class="bi bi-hand-thumbs-down-fill"></i></button>
+        </div>
+        <div id="planSources" class="mt-3"></div>
+        <div id="busesBox" class="mt-3"></div>
+        <div id="resultsFare" class="mt-3"></div>
+        <div class="k-card mt-3"><h2 class="h5"><i class="bi bi-check2-square"></i> <span data-i18n="ride.title">Before you ride</span></h2>
+          <ul class="k-check mb-0"><li data-i18n="ride.c1">Check the vehicle’s route sign matches your plan.</li><li data-i18n="ride.c2">Ask the driver or conductor for the current fare.</li>
+          <li data-i18n="ride.c3">Carry small bills or coins.</li><li data-i18n="ride.c4">Tell someone your route if the trip is new to you.</li></ul></div>
+        <div class="alert k-warn small mt-3" role="note" data-i18n="res.aiWarn">This guide is AI-made. Routes, fares, and schedules may have changed. Always verify locally.</div>
+        <button type="button" class="btn btn-link p-0 small" data-fb-open="plan"><i class="bi bi-chat-square-text"></i> <span data-i18n="fb.report">Something wrong with this route? Tell us</span></button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SAVED / GUIDE / FARES ============ -->
+<section id="view-saved" class="d-none">
+  <h1 class="k-title h2" data-i18n="saved.title">Saved places</h1>
+  <p class="text-muted" data-i18n="saved.sub">Choose Start or Destination to use a place. To add a place, tap the ☆ star next to a box on the Plan screen.</p>
+  <div id="savedList" class="list-group k-saved"></div>
+</section>
+
+<section id="view-guide" class="d-none">
+  <h1 class="k-title h2" data-i18n="guide.title">Commuter guide</h1>
+  <p class="text-muted" data-i18n="guide.sub">Tap a topic to open it. Start with “How to use Komute”.</p>
+  <div class="k-card k-tourcard mb-3 d-flex flex-wrap align-items-center gap-3">
+    <span class="k-icon"><i class="bi bi-signpost-split"></i></span>
+    <div class="flex-grow-1"><strong data-i18n="guide.tourTitle">New to Komute?</strong>
+      <div class="small text-muted" data-i18n="guide.tourText">Take the step-by-step guide: how to plan a trip and how to read your commute guide.</div></div>
+    <button type="button" class="btn btn-primary" data-tour-start><i class="bi bi-play-circle"></i> <span data-i18n="guide.tourBtn">Show me around</span></button>
+  </div>
+  <div id="guideList" class="accordion k-guide"></div>
+  <div class="k-card k-fbcard mt-3">
+    <div><strong data-i18n="fb.cardTitle">Help us improve Komute</strong>
+      <div class="small text-muted" data-i18n="fb.cardSub">Wrong route? Missing place? Idea? Send feedback. It takes 30 seconds.</div></div>
+    <button type="button" class="btn btn-primary rounded-pill" data-fb-open="idea"><i class="bi bi-chat-heart"></i> <span data-i18n="fb.send">Send feedback</span></button>
+  </div>
+  <div class="k-lockup" aria-label="Komute"><img src="assets/logo-icon.png" alt="" width="64" height="64"><div><b>Komute</b><i class="k-bars"><u></u><u></u><u></u></i></div></div>
+  <div class="d-flex align-items-center gap-2 mt-3 small text-muted"><img src="assets/qcu-seal.webp" alt="Quezon City University seal" width="40" height="40"> <span>A Quezon City University student project.</span></div>
+</section>
+
+<section id="view-fares" class="d-none">
+  <h1 class="k-title h2" data-i18n="fares.title">Fares</h1>
+  <p class="text-muted" data-i18n="fares.sub">Published rates for jeepneys, buses, trains, and other rides. Use them as a guide, then confirm before you ride.</p>
+  <div id="fareList"></div>
+</section>
+</main>
+
+<!-- Bottom tab bar (phones) -->
+<nav class="k-tabbar d-md-none" aria-label="Main">
+  <a data-nav="plan" href="#plan"><i class="bi bi-signpost-2-fill"></i><span data-i18n="nav.plan">Plan</span></a>
+  <a data-nav="saved" href="#saved"><i class="bi bi-bookmark-heart-fill"></i><span data-i18n="nav.saved">Saved</span></a>
+  <a data-nav="fares" href="#fares"><i class="bi bi-cash-coin"></i><span data-i18n="nav.fares">Fares</span></a>
+  <a data-nav="guide" href="#guide"><i class="bi bi-book-fill"></i><span data-i18n="nav.guide">Guide</span></a>
+</nav>
+
+<!-- Live navigation screen -->
+<div id="navUI" class="k-navui d-none">
+  <div class="k-nav-top" id="navTop">
+    <div class="k-nav-turn"><i id="navArrow" class="bi bi-arrow-up"></i><span id="navDist"></span></div>
+    <div class="k-nav-instr"><div id="navText" class="k-nav-text"></div><div id="navThen" class="k-nav-then"></div></div>
+  </div>
+  <div id="navOff" class="k-nav-off d-none"><span class="spinner-border spinner-border-sm"></span> <span data-i18n="nav.reroute">Off route. Finding a new way…</span></div>
+  <div class="k-nav-guide">
+    <button type="button" id="btnNavCompass" class="k-nav-dial" data-i18n-aria="nav.compassBtn" aria-label="Turn on compass"><i id="navGuide" class="bi bi-arrow-up"></i></button>
+    <div id="navGuideText" class="k-nav-guidetext"></div>
+  </div>
+  <button id="btnNavRecenter" type="button" class="btn btn-light k-nav-recenter d-none"><i class="bi bi-cursor-fill"></i> <span data-i18n="nav.recenter">Re-center</span></button>
+  <div class="k-nav-bottom" id="navBottom">
+    <div><div id="navRemain" class="k-nav-remain"></div><div id="navEta" class="small text-muted"></div></div>
+    <div class="d-flex gap-2">
+      <button id="btnNavVoice" type="button" class="btn btn-outline-secondary rounded-circle k-nav-roundbtn" aria-pressed="false" data-i18n-aria="nav.voice" aria-label="Voice directions"><i class="bi bi-volume-up-fill"></i></button>
+      <button id="btnNavExit" type="button" class="btn btn-danger rounded-pill px-4"><i class="bi bi-x-lg"></i> <span data-i18n="nav.exit">Exit</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Choose a place (saved, landmarks, recent) -->
+<div class="modal fade" id="pickModal" tabindex="-1" aria-labelledby="pickTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h5" id="pickTitle"></h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria="common.close" aria-label="Close"></button></div>
+      <div class="modal-body" id="pickBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Feedback -->
+<div class="modal fade" id="fbModal" tabindex="-1" aria-labelledby="fbTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h5" id="fbTitle" data-i18n="fb.title">Send feedback</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria="common.close" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <div class="small text-muted mb-2" id="fbTrip"></div>
+        <div class="d-flex gap-2 mb-3" role="group">
+          <button type="button" class="btn btn-outline-success rounded-pill flex-fill" data-fb-rate="up" aria-pressed="false"><i class="bi bi-hand-thumbs-up-fill"></i> <span data-i18n="fb.good">Helpful</span></button>
+          <button type="button" class="btn btn-outline-danger rounded-pill flex-fill" data-fb-rate="down" aria-pressed="false"><i class="bi bi-hand-thumbs-down-fill"></i> <span data-i18n="fb.bad">Not helpful</span></button>
+        </div>
+        <label class="form-label fw-semibold" for="fbCategory" data-i18n="fb.about">About</label>
+        <select id="fbCategory" class="form-select mb-3"></select>
+        <label class="form-label fw-semibold" for="fbMessage" data-i18n="fb.message">Your message</label>
+        <textarea id="fbMessage" class="form-control mb-3" rows="4" maxlength="1000" data-i18n-ph="fb.messagePh" placeholder="Example: The jeep from Philcoa to SM North says “SM NORTH – PHILCOA”, not “MUÑOZ”."></textarea>
+        <label class="form-label fw-semibold" for="fbContact"><span data-i18n="fb.contact">Email or name</span> <span class="text-muted fw-normal" data-i18n="fb.optional">(optional)</span></label>
+        <input id="fbContact" class="form-control" maxlength="120" autocomplete="email">
+        <div id="fbStatus" class="small mt-2" role="status" aria-live="polite"></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="pin.cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="fbSend"><i class="bi bi-send-fill"></i> <span data-i18n="fb.send">Send feedback</span></button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Account: sign in, free plans left, pay for unlimited -->
+<div class="modal fade" id="acctModal" tabindex="-1" aria-labelledby="acctTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h5" id="acctTitle">Sign in</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria="common.close" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <div id="acctReason" class="alert k-info small d-none" role="alert"></div>
+        <div id="acctBody"></div>
+        <div id="acctStatus" class="small mt-2" role="status" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Save a place -->
+<div class="modal fade" id="saveModal" tabindex="-1" aria-labelledby="saveTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h5" id="saveTitle" data-i18n="save.title">Save this place</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" data-i18n-aria="common.close" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2" id="saveAddr"></p>
+        <label class="form-label fw-semibold" for="saveName" data-i18n="save.name">Name</label>
+        <input id="saveName" class="form-control mb-3" maxlength="40">
+        <label class="form-label fw-semibold" for="saveType" data-i18n="save.type">Type</label>
+        <select id="saveType" class="form-select"></select>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" data-i18n="pin.cancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnSaveConfirm"><i class="bi bi-star-fill"></i> <span data-i18n="save.ok">Save</span></button></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<script src="js/config.js"></script>
+<script src="js/lib/core.js"></script>
+<script src="js/i18n.js?v=4"></script>
+<script src="js/lib/theme.js"></script>
+<script src="js/data/places.js"></script>
+<script src="js/data/fares.js"></script>
+<script src="js/data/transit.js"></script>
+<script src="js/data/routes.js"></script>
+<script src="js/data/ltfrb-jeep.js"></script>
+<script src="js/data/guide.js"></script>
+<script src="js/data/barangays.js"></script>
+<script src="js/data/schools.js"></script>
+<script src="js/lib/plan-cards.js"></script>
+<script src="js/lib/plan-view.js"></script>
+<script src="js/lib/api.js?v=2"></script>
+<script src="js/lib/map.js?v=4"></script>
+<script src="js/lib/sensors.js"></script>
+<script src="js/lib/typeahead.js?v=6"></script>
+<script src="js/state.js"></script>
+<script src="js/lib/fare-estimate.js"></script>
+<script src="js/lib/route.js"></script>
+<script src="js/lib/navigate.js"></script>
+<script src="js/lib/dircompass.js"></script>
+<script src="js/lib/buses.js"></script>
+<script src="js/lib/feedback.js"></script>
+<script src="js/lib/account.js?v=4"></script>
+<script src="js/lib/tour.js"></script>
+<script src="js/views/home.js?v=4"></script>
+<script src="js/views/results.js?v=3"></script>
+<script src="js/views/saved.js"></script>
+<script src="js/views/guide.js"></script>
+<script src="js/views/fare-page.js?v=2"></script>
+<script src="js/app.js"></script>
+<script>
+/* Tells the Android app when a touch starts on the map, a list or a text box, so pull-to-refresh never steals those drags. */
+document.addEventListener("touchstart", function (e) { try { if (window.KomuteBridge) KomuteBridge.noPull(!!(e.target && e.target.closest && e.target.closest(".maplibregl-map,.k-map,.k-sugglist,.k-cats,input,textarea,select,.modal,.k-navui"))); } catch (_) {} }, { passive: true, capture: true });
+</script>
+</body>
+</html>
