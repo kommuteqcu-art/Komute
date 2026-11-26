@@ -22,7 +22,7 @@ const PM_BASE = (process.env.PAYMONGO_API_BASE || "https://api.paymongo.com").re
 const FREE_PLANS = Math.max(0, Number(process.env.FREE_PLANS || 5));
 const PLANS = {
   month: { days: 30, php: Number(process.env.PRICE_MONTH_PHP || 10) },
-  year: { days: 365, php: Number(process.env.PRICE_YEAR_PHP || 120) }
+  year: { days: 365, php: Number(process.env.PRICE_YEAR_PHP || 99) }
 };
 // GCash, Maya and QR Ph only: a card fee (3.125% + ₱13.39) is more than a ₱10 payment.
 const PAY_METHODS = (process.env.PAYMONGO_METHODS || "gcash,paymaya,qrph").split(",").map((s) => s.trim()).filter(Boolean);
