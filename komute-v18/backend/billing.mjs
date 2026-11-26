@@ -1,4 +1,4 @@
-// Komute accounts and payments: sign in (Supabase), 5 free route plans, then ₱10/month or ₱120/year (PayMongo).
+// Komute accounts and payments: sign in (Supabase), 5 free route plans, then ₱10/month or ₱99/year (PayMongo).
 // If the Supabase keys are not set, everything here is switched off and the app stays free for everyone.
 //
 // Render "Environment" settings used here:
@@ -6,7 +6,7 @@
 //   SUPABASE_PUBLISHABLE_KEY  sb_publishable_...   (older projects: the "anon" key; SUPABASE_ANON_KEY also works)
 //   SUPABASE_SECRET_KEY       sb_secret_...        (older projects: the "service_role" key; SUPABASE_SERVICE_KEY also works)
 //   PAYMONGO_SECRET_KEY       sk_test_... for practice, sk_live_... for real money
-//   FREE_PLANS=5  PRICE_MONTH_PHP=10  PRICE_YEAR_PHP=120   (optional, these are the defaults)
+//   FREE_PLANS=5  PRICE_MONTH_PHP=10  PRICE_YEAR_PHP=99   (optional, these are the defaults)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -22,7 +22,7 @@ const PM_BASE = (process.env.PAYMONGO_API_BASE || "https://api.paymongo.com").re
 const FREE_PLANS = Math.max(0, Number(process.env.FREE_PLANS || 5));
 const PLANS = {
   month: { days: 30, php: Number(process.env.PRICE_MONTH_PHP || 10) },
-  year: { days: 365, php: Number(process.env.PRICE_YEAR_PHP || 120) }
+  year: { days: 365, php: Number(process.env.PRICE_YEAR_PHP || 99) }
 };
 // GCash, Maya and QR Ph only: a card fee (3.125% + ₱13.39) is more than a ₱10 payment.
 const PAY_METHODS = (process.env.PAYMONGO_METHODS || "gcash,paymaya,qrph").split(",").map((s) => s.trim()).filter(Boolean);

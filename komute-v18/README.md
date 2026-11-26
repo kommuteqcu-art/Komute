@@ -32,7 +32,7 @@ OpenRouter (`OPENROUTER_API_KEY`) works the same way.
 Open **http://localhost:8080/api/ai-status**, or run `npm run check-ai` in `backend`.
 It tells you which model answered, or what is wrong (bad key, quota used up, model retired).
 
-## Accounts and payments (5 free plans, then ₱10/month or ₱120/year)
+## Accounts and payments (5 free plans, then ₱10/month or ₱99/year)
 
 Switched off until the keys below are set; without them Komute is free with no sign-in.
 
@@ -145,10 +145,10 @@ Your GCash sends you a text like "You have received PHP 10.00 ... Ref. No. 12345
 1. Render → Environment: add `PAY_SMS_KEY` (a long secret word, 8+ characters). Run the new `incoming_payments` part of `backend/supabase.sql` in Supabase.
 2. On the Android phone that has the GCash number, install a free SMS-forwarding app (for example "SMS Forwarder" or MacroDroid). Rule: when an SMS from GCash arrives, send an HTTP POST to
    `https://komute.onrender.com/api/gcash-sms?key=YOUR_PAY_SMS_KEY` with the message text as the body.
-3. Done. A reference number is accepted only if a received-money message with that number and the exact price (₱10 or ₱120) has arrived. A wrong amount is refused.
+3. Done. A reference number is accepted only if a received-money message with that number and the exact price (₱10 or ₱99) has arrived. A wrong amount is refused.
 
 ### No reference number needed
-When automatic checking is on, a person taps **Get my payment amount** and receives their own amount, for example ₱10.37 (₱10.01 to ₱10.49, or ₱120.01 to ₱120.49 for the year). They send exactly that amount to your GCash. When the GCash message arrives, the account with that amount unlocks by itself. The amount is held for 30 minutes (`PAY_REQUEST_MINUTES`). Run the new `payment_requests` part of `backend/supabase.sql` once.
+When automatic checking is on, a person taps **Get my payment amount** and receives their own amount, for example ₱10.37 (₱10.01 to ₱10.49, or ₱99.01 to ₱99.49 for the year). They send exactly that amount to your GCash. When the GCash message arrives, the account with that amount unlocks by itself. The amount is held for 30 minutes (`PAY_REQUEST_MINUTES`). Run the new `payment_requests` part of `backend/supabase.sql` once.
 
 ## Gmail verification code (email code, and Gmail instead of the SMS app)
 

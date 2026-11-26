@@ -1,4 +1,4 @@
-// Sign in, free route plans left, and paying for unlimited plans (₱10/month or ₱120/year with GCash, Maya or QR Ph).
+// Sign in, free route plans left, and paying for unlimited plans (₱10/month or ₱99/year with GCash, Maya or QR Ph).
 // Everything here hides itself when the server has accounts switched off.
 (function (K) {
   const $ = (id) => document.getElementById(id);
@@ -109,7 +109,7 @@
     const body = $("acctBody");
     if (!info.signedIn) {
       $("acctTitle").textContent = K.t(mode === "signup" ? "acct.create" : "acct.signIn");
-      body.innerHTML = `${info.loadError ? `<div class="alert alert-warning small">${K.esc(info.loadError)}</div>` : ""}<p class="small text-muted">${K.esc(K.t("acct.why", { n: info.freeLimit || 5, m: info.prices?.month ?? 10, y: info.prices?.year ?? 120 }))}</p>
+      body.innerHTML = `${info.loadError ? `<div class="alert alert-warning small">${K.esc(info.loadError)}</div>` : ""}<p class="small text-muted">${K.esc(K.t("acct.why", { n: info.freeLimit || 5, m: info.prices?.month ?? 10, y: info.prices?.year ?? 99 }))}</p>
         <form id="acctForm" novalidate>
           <label class="form-label fw-semibold" for="acctEmail">${K.esc(K.t("acct.email"))}</label>
           <input id="acctEmail" type="email" class="form-control mb-3" autocomplete="email" required>
@@ -203,7 +203,7 @@
     const ref = `<details class="mt-3 small"><summary class="text-muted">${K.esc(K.t("acct.haveRef"))}</summary>
       <input id="manualRef" class="form-control mt-2" maxlength="40" autocomplete="off" placeholder="${K.esc(K.t("acct.refPh"))}">
       <button type="button" class="btn btn-outline-primary w-100 mt-2" id="manualSend">${K.esc(K.t("acct.submitRef2"))}</button></details>`;
-    // Fixed price (₱10 or ₱120, no extra centavos). One button opens the payment box; the QR shows at once as the other way to pay.
+    // Fixed price (₱10 or ₱99, no extra centavos). One button opens the payment box; the QR shows at once as the other way to pay.
     const price = info.prices[manualPlan];
     const qr = (manualPlan === "year" ? m.qrYear : m.qrMonth) || m.qr;
     if (!payShown) return `${codeHtml()}${tiles}<button type="button" class="btn btn-primary w-100 mt-3" id="reqBtn"><i class="bi bi-qr-code"></i> ${K.esc(K.t("acct.getAmount"))}</button>
