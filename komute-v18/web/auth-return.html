@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Komute sign-in</title>
+<style>body{font-family:system-ui,sans-serif;background:#f4f7f4;color:#14301f;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:1rem}
+a{display:inline-block;margin-top:1rem;background:#0b6b47;color:#fff;padding:.8rem 1.4rem;border-radius:999px;text-decoration:none;font-weight:700}</style></head>
+<body><div><h1>Signed in</h1><p>Opening the Komute app...</p><a id="open" href="#">Open Komute</a>
+<p><small>If nothing happens, tap the button.</small></p></div>
+<script>
+// Used only by the Android app: Google signs you in here (in the phone's browser), then this page hands the session to the app.
+var q = location.hash.replace(/^#/, "");
+var target = "komute://auth?" + q;
+document.getElementById("open").href = target;
+if (q) { location.replace(target); }
+</script></body></html>
