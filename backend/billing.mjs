@@ -380,6 +380,12 @@ function notify(subject, lines) {
   sendMail(subject, lines.join("\n")).then((ok) => { if (ok) console.log(`Payment email sent: ${subject}`); else if (env("GMAIL_USER") && !MAIL_HOOK) console.warn("Payment email was not sent (SMTP is blocked on Render's free plan: use MAIL_HOOK_URL)."); }).catch(() => {});
 }
 
+// Feedback from the "Send feedback" box: phone push + email to MAIL_TO (same way as payment emails)
+export function notifyFeedback(subject, lines) {
+  push(subject, lines.join("\n"));
+  sendMail(subject, lines.join("\n")).then((ok) => { if (ok) console.log("Feedback email sent"); else console.warn("Feedback email was not sent (check MAIL_HOOK_URL / PAY_SMS_KEY in Render)"); }).catch((e) => console.warn("Feedback email failed:", e.message));
+}
+
 // Open  /api/mail-test?key=YOUR_PAY_SMS_KEY  in a browser to send a test email and see what went wrong, if anything.
 export async function mailTest(key) {
   const a = Buffer.from(String(key || "")), c = Buffer.from(SMS_KEY);
