@@ -178,6 +178,82 @@
     return data.routes.map((route) => withJunctionDelays(route, profile, departure)).sort((x, y) => x.duration - y.duration);
   }
 
+  // Shape only. Keep Komute's published stop order, fares and ride instructions.
+  const pathRequests = new Map();
+
+  function roadPath(profile, waypoints) {
+    const key = JSON.stringify([profile, waypoints]);
+    if (!pathRequests.has(key)) {
+      if (pathRequests.size >= 64) pathRequests.delete(pathRequests.keys().next().value);
+      pathRequests.set(key, findRoadPath(profile, waypoints).catch(() => null));
+    }
+    return pathRequests.get(key);
+  }
+
+  function nearestOnPath(point, path) {
+    const [lng, lat] = point;
+    const xScale = 111320 * Math.cos(lat * Math.PI / 180);
+    const yScale = 110540;
+    let nearest = { distance: Infinity, position: 0 };
+    for (let i = 1; i < path.length; i++) {
+      const dx = (path[i][0] - path[i - 1][0]) * xScale;
+      const dy = (path[i][1] - path[i - 1][1]) * yScale;
+      const x = (lng - path[i - 1][0]) * xScale;
+      const y = (lat - path[i - 1][1]) * yScale;
+      const t = Math.max(0, Math.min(1, (x * dx + y * dy) / (dx * dx + dy * dy || 1)));
+      const distance = Math.hypot(x - t * dx, y - t * dy);
+      if (distance < nearest.distance) nearest = { distance, position: i - 1 + t };
+    }
+    return nearest;
+  }
+
+  async function findRoadPath(profile, waypoints) {
+    const radius = profile === "walk" ? 90 : 150;
+    const signal = AbortSignal.timeout(8500);
+    async function query(points) {
+      const coordinates = points.map(([lng, lat]) => `${lng},${lat}`).join(";");
+      const radiuses = points.map(() => radius).join(";");
+      const url = `${ROUTER}/${PROFILES[profile]}/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false&radiuses=${radiuses}`;
+      const response = await fetch(url, { signal });
+      return response.ok ? response.json() : null;
+    }
+    if (waypoints.length < 2) return null;
+    const length = K.geo.cumulative(waypoints).at(-1);
+    const usable = (route, max) => route?.distance <= max && route.geometry?.coordinates?.length >= 2;
+    const first = waypoints[0], last = waypoints.at(-1);
+    const direct = (await query([first, last]))?.routes?.[0];
+    const directUsable = usable(direct, length * 1.8 + 300);
+    if (waypoints.length === 2) return directUsable ? direct.geometry.coordinates : null;
+
+    // A direct road can already pass close enough to several of the approximate
+    // stops. Using them as hard via points can send the trace down side streets.
+    let lastPosition = 0;
+    const checkpoints = directUsable ? waypoints.slice(1, -1).filter((point) => {
+      const nearest = nearestOnPath(point, direct.geometry.coordinates);
+      if (nearest.distance > radius || nearest.position < lastPosition) return true;
+      lastPosition = nearest.position;
+      return false;
+    }) : waypoints.slice(1, -1);
+    if (directUsable && !checkpoints.length) return direct.geometry.coordinates;
+
+    const via = [first, ...checkpoints, last];
+    const limit = length * 1.8 + 300;
+    const data = await query(via);
+    const best = data?.routes?.[0];
+    if (usable(best, limit)) return best.geometry.coordinates;
+
+    // An approximate interior stop may snap far from its road and force a long detour.
+    // Retry without the worst interior point while keeping both boarding and alighting points.
+    let outlier = -1, offset = 60;
+    for (let i = 1; i < via.length - 1; i++) {
+      const distance = data?.waypoints?.[i]?.distance;
+      if (distance > offset) { outlier = i; offset = distance; }
+    }
+    if (outlier < 0 || via.length <= 3) return null;
+    const retry = (await query(via.filter((_, i) => i !== outlier)))?.routes?.[0];
+    return usable(retry, limit) ? retry.geometry.coordinates : null;
+  }
+
   async function feedback(payload) { return post("/api/feedback", payload); }
 
   // Every mapped terminal, stop, and station in Quezon City (OpenStreetMap), loaded once per visit.
@@ -191,5 +267,5 @@
     return pointsPromise;
   }
 
-  K.api = { feedback, transitPoints, loadBorder, searchPlaces, autocomplete, placeDetails, planCommute, reverseGeocode, roadRoutes };
+  K.api = { feedback, transitPoints, loadBorder, searchPlaces, autocomplete, placeDetails, planCommute, reverseGeocode, roadRoutes, roadPath };
 })(window.Komute);

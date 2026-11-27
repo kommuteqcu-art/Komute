@@ -38,7 +38,10 @@ summary:focus-visible, [role="tabpanel"]:focus-visible { outline: 2px solid var(
 .k-header { background: var(--k-green-dark); color: #fff; border-bottom: 1px solid #ffffff26; position: sticky; top: 0; z-index: 1030;
   padding-top: env(safe-area-inset-top); }
 .k-brand { display: flex; align-items: center; gap: .55rem; color: #fff; text-decoration: none; font-weight: 800; font-size: 1.5rem; letter-spacing: -.02em; }
+.k-brand img { flex: none; }
+.k-brand span { overflow: hidden; text-overflow: ellipsis; }
 .k-brand:hover { color: #fff; }
+.k-header-actions { display: flex; flex: none; align-items: center; gap: .5rem; }
 .k-nav .nav-link { color: #cfe8e0; border-radius: 999px; padding: .4rem .9rem; }
 .k-nav .nav-link:hover { color: #fff; }
 .k-nav .nav-link.active { background: #ffffff22; color: #fff; font-weight: 700; }
@@ -412,8 +415,6 @@ body.k-mapfull .k-pinbar { bottom: calc(1rem + env(safe-area-inset-bottom)); }
 .k-plan-price { font-size: 1.6rem; font-weight: 800; color: var(--k-green-ink); line-height: 1.1; }
 .k-paywall { padding: 1.5rem 1rem; }
 .k-paywall-icon { font-size: 2.4rem; color: var(--k-green-ink); display: block; margin-bottom: .5rem; }
-@media (max-width: 420px) { .k-acct-btn { padding: .25rem .55rem; font-size: .78rem; } .k-brand { font-size: 1.15rem; } }
-
 .k-plans .k-plan.on { background: #eef6f3; box-shadow: inset 0 0 0 2px var(--k-green-dark); }
 .k-paybox { border: 1px solid #cfe3db; background: #f7fbf9; border-radius: 14px; padding: .9rem; }
 .k-pay-row { display: flex; justify-content: space-between; gap: .8rem; padding: .25rem 0; flex-wrap: wrap; }
@@ -426,7 +427,7 @@ body.k-mapfull .k-pinbar { bottom: calc(1rem + env(safe-area-inset-bottom)); }
    Bootstrap's own parts follow data-bs-theme="dark"; below are Komute's colors.
    The jeepney signboard keeps its real yellow look in both themes.
    ========================================================================= */
-.k-theme-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35);
+.k-theme-btn { display: inline-grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.35);
   background: rgba(255,255,255,.1); color: #fff; font-size: 1rem; padding: 0; }
 .k-theme-btn:hover, .k-theme-btn[aria-expanded="true"] { background: rgba(255,255,255,.22); }
 .k-theme-note { position: fixed; left: 50%; top: calc(4.6rem + env(safe-area-inset-top)); transform: translate(-50%, -.5rem); z-index: 1100;
@@ -659,9 +660,18 @@ button.k-recent, .k-recent { color: var(--k-ink); }
 .k-mapbtns-trip .k-fab-sm { width: 2.75rem; height: 2.75rem; }
 .k-opt.is-selected { border-color: var(--k-green); }
 .k-map-route-note { position: absolute; z-index: 2; inset-inline-start: .75rem; bottom: 1.6rem; margin: 0;
-  padding: .25rem .5rem; border-radius: 6px; background: var(--k-surface); color: var(--k-muted); font-size: .8125rem; }
+  max-width: calc(100% - 5rem); padding: .25rem .5rem; border-radius: 6px; background: var(--k-surface); color: var(--k-muted); font-size: .8125rem; }
+#mapRouteSource { margin-inline-start: .25rem; white-space: nowrap; }
 .k-nav-map:has(.k-legend:not(.d-none)) .k-map-route-note { inset-inline-start: auto; inset-inline-end: .75rem; }
 body.k-navigating .k-trip-mapbar, body.k-navigating .k-map-route-note { display: none; }
+.k-google-signin { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px;
+  padding: 8px 12px; border: 1px solid #747775; border-radius: 10px; background: #fff; color: #1f1f1f;
+  font: 600 .875rem/1.4 "Google Sans", "Figtree", sans-serif; }
+.k-google-signin img { flex: none; object-fit: contain; }
+.k-google-signin:hover { background: #f2f2f2; }
+.k-google-signin:disabled { opacity: .65; }
+.k-auth-divider { display: flex; align-items: center; gap: .65rem; margin: .8rem 0; color: var(--k-muted); font-size: .85rem; }
+.k-auth-divider::before, .k-auth-divider::after { content: ""; flex: 1; border-top: 1px solid var(--k-outline); }
 @media (max-width: 575.98px) {
   .k-tab > span { flex-basis: 100%; }
 }
@@ -675,11 +685,14 @@ html, body { overflow-x: clip; max-width: 100%; }
 .k-header .container > * { min-width: 0; }
 @media (max-width: 575px) {
   .k-header .container { padding-left: .6rem; padding-right: .6rem; gap: .35rem !important; }
-  .k-brand { font-size: 1.1rem; gap: .35rem; flex: none; }
+  .k-brand { font-size: 1.1rem; gap: .35rem; }
   .k-brand img { width: 32px; height: 32px; }
-  .k-header .container > .d-flex { gap: .3rem !important; min-width: 0; }
-  .k-acct-btn { padding: .25rem .5rem; font-size: .75rem; white-space: nowrap; }
+  .k-header-actions { gap: .3rem; }
+  .k-acct-btn { padding: .25rem .5rem; font-size: .75rem; }
   .k-acct-btn span { max-width: 5.2rem; overflow: hidden; text-overflow: ellipsis; }
-  .k-theme-btn { width: 32px; height: 32px; flex: none; }
   .k-lang button { padding: .25rem .55rem; min-height: 32px; font-size: .85rem; }
+}
+@media (max-width: 359px) {
+  .k-acct-btn { width: 40px; height: 40px; justify-content: center; padding: 0; font-size: 1rem; }
+  .k-acct-btn span { display: none; }
 }

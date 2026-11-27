@@ -5,6 +5,8 @@
   const TRAVEL = { drive: "driving", walk: "walking", bike: "bicycling" };
   let km, mode = "commute", pts = null, routes = {}, sel = 0, run = 0;
   let commute = { options: [], selected: 0 };
+  const snappedOptions = new WeakMap();
+  const rail = new Set(["mrt3", "lrt1", "lrt2", "train"]);
 
   // Google supplies localized instructions, while OSRM steps use Komute's translations.
   function say(s) {
@@ -36,7 +38,7 @@
     let previous = endpoints?.[0] && K.geo.ll(endpoints[0]);
     const addLink = (from, to) => {
       if (valid(from) && valid(to) && (from[0] !== to[0] || from[1] !== to[1])) {
-        segments.push({ coordinates: [from, to], dashed: true });
+        segments.push({ coordinates: [from, to], dashed: true, profile: "walk" });
       }
     };
     for (const step of option.steps) {
@@ -46,7 +48,8 @@
       ]).filter(valid);
       if (coordinates.length < 2) { previous = null; continue; }
       addLink(previous, coordinates[0]);
-      segments.push({ coordinates });
+      const onRoad = !rail.has(step.mode);
+      segments.push({ coordinates, profile: onRoad ? "drive" : null, dashed: onRoad });
       previous = coordinates[coordinates.length - 1];
     }
     if (!segments.length) return null;
@@ -54,14 +57,45 @@
     return { segments };
   }
 
+  function snappedPath(option, fallback) {
+    if (!fallback?.segments.some((segment) => segment.profile)) return fallback;
+    const key = JSON.stringify(fallback.segments);
+    const cached = snappedOptions.get(option);
+    if (cached?.key === key) return cached.path;
+
+    const request = { key, path: fallback };
+    snappedOptions.set(option, request);
+    Promise.all(fallback.segments.map(async (segment) => {
+      if (!segment.profile) return segment;
+      const waypoints = segment.coordinates.filter(([lng, lat], i, points) =>
+        !i || lng !== points[i - 1][0] || lat !== points[i - 1][1]);
+      if (waypoints.length < 2) return segment;
+      const shape = await K.api.roadPath(segment.profile, waypoints).catch(() => null);
+      return shape ? { ...segment, coordinates: shape, dashed: segment.profile === "walk", snapped: true } : segment;
+    })).then((segments) => {
+      if (snappedOptions.get(option) !== request) return;
+      request.path = { segments };
+      if (mode === "commute" && commute.options[commute.selected] === option && K.app.currentView() === "results") {
+        renderCommute();
+      }
+    });
+    return request.path;
+  }
+
   function renderCommute(fit = false) {
     const { options, selected, onPick } = commute;
     const endpoints = S.ai.guide?.endpoints || pts;
-    const rendered = options.map((o) => o.steps.some((s) => s.door) ? routes.drive?.[0] || null : transitPath(o, endpoints));
+    const rendered = options.map((o, i) => {
+      if (o.steps.some((s) => s.door)) return routes.drive?.[0] || null;
+      const path = transitPath(o, endpoints);
+      return km && i === selected ? snappedPath(o, path) : snappedOptions.get(o)?.path || path;
+    });
     $("mapFareValue").textContent = options[selected]?.fare || "";
     $("mapRouteNote").classList.toggle("d-none", !km || !rendered[selected]?.segments);
+    const attribution = $("mapRouteSource");
+    if (attribution) attribution.classList.toggle("d-none", !rendered[selected]?.segments?.some((s) => s.snapped));
     if (!km) return;
-    km.setRoutes(rendered, selected, { labels: false, onPick });
+    km.setRoutes(rendered, selected, { labels: false, onPick, compact: true });
     if (fit && rendered[selected]) {
       km.fitRoute(rendered[selected], { top: 150, bottom: 40, left: 36, right: 44 });
     }

@@ -25,7 +25,11 @@
     const icon = document.getElementById("themeIcon");
     if (icon) icon.className = "bi " + ICON[m];
     const btn = document.getElementById("themeBtn");
-    if (btn && K.t) btn.title = `${K.t("theme.label")}: ${K.t("theme." + m)}`;
+    if (btn && K.t) {
+      const label = `${K.t("theme.label")} (${K.t("theme." + m)})`;
+      btn.setAttribute("aria-label", label);
+      btn.title = label;
+    }
     if (lastDark !== null && lastDark !== dark) listeners.forEach((f) => { try { f(dark); } catch (e) { console.warn(e); } });
     lastDark = dark;
   }

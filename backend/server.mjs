@@ -6,10 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadNetwork, loadWebData, findOptions, optionFromCandidate, describeForPrompt, fixRideStep, closeGaps, MAX_RIDES, rideLimit, planFare } from "./transit.mjs";
-import * as billing from "./billing.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENV_FILE = loadEnvFile();
+const billing = await import("./billing.mjs");
 
 // ---------- Settings (from .env) ----------
 const PORT = Number(process.env.PORT || 8080);
@@ -110,6 +110,7 @@ const server = http.createServer(async (request, response) => {
     if (url.pathname === "/api/account") return json(response, 200, await billing.account(request));
     if (url.pathname === "/api/auth/signup") return json(response, 200, await billing.signUp(body));
     if (url.pathname === "/api/auth/login") return json(response, 200, await billing.signIn(body));
+    if (url.pathname === "/api/auth/google") return json(response, 200, await billing.signInWithGoogle(body));
     if (url.pathname === "/api/auth/refresh") return json(response, 200, await billing.refresh(body));
     if (url.pathname === "/api/pay") return json(response, 200, await billing.startPayment(request, body));
     if (url.pathname === "/api/pay/request") return json(response, 200, await billing.payRequest(request, body));
@@ -1667,10 +1668,13 @@ function serveStatic(request, response, url) {
   }
   let urlPath;
   try { urlPath = decodeURIComponent(url.pathname); } catch { return json(response, 400, { error: "Bad path" }); }
-  const file = path.resolve(WEB_DIR, "." + (urlPath === "/" ? "/index.html" : urlPath));
+  const callback = urlPath === "/auth/callback";
+  const file = path.resolve(WEB_DIR, "." + (urlPath === "/" || callback ? "/index.html" : urlPath));
   const inside = file === WEB_DIR || file.startsWith(WEB_DIR + path.sep);
   if (!inside || !fs.existsSync(file) || !fs.statSync(file).isFile()) return json(response, 404, { error: "Not found" });
-  response.writeHead(200, { "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream", "Cache-Control": "no-cache" });
+  if (callback) response.setHeader("Referrer-Policy", "no-referrer");
+  response.writeHead(200, { "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream",
+    "Cache-Control": callback ? "no-store" : "no-cache" });
   if (request.method === "HEAD") return response.end();
   fs.createReadStream(file).pipe(response);
 }

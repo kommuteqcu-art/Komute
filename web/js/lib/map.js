@@ -253,7 +253,7 @@
         });
         map.fitBounds(extent, inset);
       },
-      setRoutes(list, selected, { faint = false, labels: showLabels = true, onPick } = {}) {
+      setRoutes(list, selected, { faint = false, labels: showLabels = true, onPick, compact = false } = {}) {
         for (const line of lines.splice(0)) line.setMap(null);
         for (const label of labels.splice(0)) label.map = null;
         (list || []).forEach((route, index) => {
@@ -266,13 +266,13 @@
             const dashed = faint || segment.dashed;
             const color = active ? "#2563eb" : "#7698df";
             if (active && !dashed) lines.push(new maps.Polyline({
-              map, path, strokeColor: "#0b2f9e", strokeWeight: 11, clickable: false, zIndex: 5
+              map, path, strokeColor: "#0b2f9e", strokeWeight: compact ? 7 : 11, clickable: false, zIndex: 5
             }));
             const line = new maps.Polyline({
-              map, path, strokeColor: color, strokeWeight: active ? 7 : 5,
-              strokeOpacity: dashed ? 0 : 1, clickable: !faint && !!onPick, zIndex: active ? 6 : 4,
+              map, path, strokeColor: color, strokeWeight: active ? (compact ? 5 : 7) : (compact ? 4 : 5),
+              strokeOpacity: dashed ? 0 : compact && !active ? 0.6 : 1, clickable: !faint && !!onPick, zIndex: active ? 6 : 4,
               ...(dashed && { icons: [{ icon: { path: "M 0,-1 0,1", strokeColor: color,
-                strokeOpacity: 0.85, strokeWeight: 3, scale: 2 }, repeat: "12px" }] })
+                strokeOpacity: compact && !active ? 0.45 : 0.85, strokeWeight: compact ? 2 : 3, scale: 2 }, repeat: "12px" }] })
             });
             lines.push(line);
             if (!faint && onPick) line.addListener("click", () => onPick(index));

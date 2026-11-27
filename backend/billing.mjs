@@ -139,6 +139,21 @@ export async function signIn(body) {
   }
   return { session: session(r.data) };
 }
+export async function signInWithGoogle(body) {
+  if (!billingOn || !googleUrl()) throw fail(503, "google_off", "Google sign-in is not enabled.");
+  const code = String(body.code || "");
+  const verifier = String(body.verifier || "");
+  if (!/^[A-Za-z0-9._~-]{16,1024}$/.test(code) || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) {
+    throw fail(400, "google_invalid", "Start Google sign-in again.");
+  }
+  const r = await sb("/auth/v1/token?grant_type=pkce", {
+    method: "POST", key: SB_PUBLIC, body: { auth_code: code, code_verifier: verifier }
+  });
+  if (!r.ok || !r.data?.access_token || !r.data?.refresh_token) {
+    throw fail(401, "google_failed", "Google sign-in could not be completed. Please try again.");
+  }
+  return { session: session(r.data) };
+}
 export async function refresh(body) {
   if (!billingOn) throw fail(503, "billing_off", "Accounts are not set up on this server.");
   const r = await sb("/auth/v1/token?grant_type=refresh_token", { method: "POST", key: SB_PUBLIC, body: { refresh_token: String(body.refreshToken || "") } });

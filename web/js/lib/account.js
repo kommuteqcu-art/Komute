@@ -1,10 +1,12 @@
 // Sign in, free route plans left, and paying for unlimited plans (₱10/month or ₱99/year with GCash, Maya or QR Ph).
-// Everything here hides itself when the server has accounts switched off.
+// The account entry remains available when this server has accounts switched off.
 (function (K) {
   const $ = (id) => document.getElementById(id);
   const cfg = window.KOMUTE_CONFIG || {};
   const base = (cfg.API_BASE || "").replace(/\/$/, "");
-  let info = { billing: false };   // last answer from /api/account
+  const googleFlowKey = "komute.googleSignIn";
+  const googleCallback = "/auth/callback";
+  let info = { billing: null };   // last answer from /api/account
   let modal = null, mode = "login"; // "login" | "signup"
 
   // ---------- session (kept on this phone) ----------
@@ -68,12 +70,12 @@
   function paint() {
     const btn = $("acctBtn");
     if (!btn) return;
-    btn.classList.toggle("d-none", !info.billing);
-    if (!info.billing) return;
     let icon = "bi-person-circle", text = K.t("acct.signIn");
     if (info.signedIn && info.premium) { icon = "bi-star-fill"; text = K.t("acct.unlimited"); }
     else if (info.signedIn) { icon = "bi-person-check-fill"; text = K.t("acct.freeShort", { n: info.freeLeft }); }
-    btn.innerHTML = `<i class="bi ${icon}"></i><span>${K.esc(text)}</span>`;
+    btn.innerHTML = `<i class="bi ${icon}" aria-hidden="true"></i><span>${K.esc(text)}</span>`;
+    btn.setAttribute("aria-label", text);
+    btn.title = text;
     btn.classList.toggle("k-acct-premium", Boolean(info.premium));
     // "Go unlimited" bar under the Find button: anyone signed in without Unlimited can subscribe right away, even with free plans left
     const bar = $("upgradeBar");
@@ -107,9 +109,23 @@
 
   function render() {
     const body = $("acctBody");
+    if (info.billing !== true) {
+      $("acctTitle").textContent = K.t("acct.signIn");
+      const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+      body.innerHTML = `<p class="text-muted mb-0" role="status">${K.esc(K.t(info.billing === null ? "acct.wait" : "acct.unavailable"))}</p>`;
+      if (info.billing === false && local) {
+        body.insertAdjacentHTML("beforeend", `<a class="btn btn-primary mt-3" href="https://komute.onrender.com/">${K.esc(K.t("acct.openLive"))}</a>`);
+      }
+      return;
+    }
     if (!info.signedIn) {
       $("acctTitle").textContent = K.t(mode === "signup" ? "acct.create" : "acct.signIn");
       body.innerHTML = `${info.loadError ? `<div class="alert alert-warning small">${K.esc(info.loadError)}</div>` : ""}<p class="small text-muted">${K.esc(K.t("acct.why", { n: info.freeLimit || 5, m: info.prices?.month ?? 10, y: info.prices?.year ?? 99 }))}</p>
+        ${info.google ? `<button type="button" class="k-google-signin w-100" id="acctGoogle">
+          <img src="/assets/google-signin.png" width="20" height="20" alt="">
+          <span>${K.esc(K.t("acct.google"))}</span>
+        </button>
+        <div class="k-auth-divider"><span>${K.esc(K.t("acct.orEmail"))}</span></div>` : ""}
         <form id="acctForm" novalidate>
           <label class="form-label fw-semibold" for="acctEmail">${K.esc(K.t("acct.email"))}</label>
           <input id="acctEmail" type="email" class="form-control mb-3" autocomplete="email" required>
@@ -120,6 +136,7 @@
         <button type="button" class="btn btn-link w-100 mt-2" id="acctSwitch">${K.esc(K.t(mode === "signup" ? "acct.haveAccount" : "acct.noAccount"))}</button>`;
       $("acctSwitch").onclick = () => { mode = mode === "signup" ? "login" : "signup"; status(""); render(); };
       $("acctForm").onsubmit = submitLogin;
+      if ($("acctGoogle")) $("acctGoogle").onclick = startGoogle;
       return;
     }
     $("acctTitle").textContent = K.t("acct.title");
@@ -292,6 +309,60 @@
     finally { btn.disabled = false; }
   }
 
+  async function startGoogle(event) {
+    const button = event.currentTarget;
+    button.disabled = true;
+    status(K.t("acct.googleOpening"));
+    try {
+      const random = crypto.getRandomValues(new Uint8Array(32));
+      const verifier = Array.from(random, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+      const challenge = btoa(String.fromCharCode(...new Uint8Array(hash)))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const url = new URL(info.google);
+      url.searchParams.set("redirect_to", new URL(googleCallback, location.origin).href);
+      url.searchParams.set("code_challenge", challenge);
+      url.searchParams.set("code_challenge_method", "s256");
+
+      const { origin, destination, originPoint, destinationPoint } = K.state;
+      const view = K.app.currentView();
+      sessionStorage.setItem(googleFlowKey, JSON.stringify({
+        verifier, returnView: view === "results" ? "plan" : view, pendingPlan,
+        draft: { origin, destination, originPoint, destinationPoint }
+      }));
+      location.assign(url.href);
+    } catch {
+      button.disabled = false;
+      status(K.t("acct.googleFailed"), "err");
+    }
+  }
+
+  async function finishGoogle() {
+    const code = new URLSearchParams(location.search).get("code");
+    let flow;
+    try {
+      flow = JSON.parse(sessionStorage.getItem(googleFlowKey));
+      sessionStorage.removeItem(googleFlowKey);
+    } catch { /* Storage can be unavailable in private browsing. */ }
+    const view = ["plan", "saved", "fares", "guide"].includes(flow?.returnView) ? flow.returnView : "plan";
+    history.replaceState(null, "", "/#" + view);
+    if (flow?.draft) Object.assign(K.state, flow.draft);
+    try {
+      if (!code || !flow?.verifier) throw new Error("Missing authorization");
+      const result = await call("/api/auth/google", { code, verifier: flow.verifier }, false);
+      setSession(result.session);
+      await load();
+      if (info.signedIn && flow.pendingPlan) K.app.findRoutes();
+      else {
+        open("");
+        status(K.t(info.signedIn ? "acct.welcome" : "acct.googleFailed"), info.signedIn ? "ok" : "err");
+      }
+    } catch {
+      await load();
+      open(K.t("acct.googleFailed"));
+    }
+  }
+
   async function buy(plan, btn) {
     btn.disabled = true; status(K.t("acct.opening"));
     try {
@@ -334,7 +405,8 @@
     if (!$("acctBtn") || !$("acctModal")) return; // older index.html without the account parts
     $("acctBtn").onclick = () => open("");
     if ($("upgradeBtn")) $("upgradeBtn").onclick = () => open("");
-    load().then(handleReturn);
+    if (location.pathname === googleCallback) finishGoogle();
+    else load().then(handleReturn);
   }
 
   K.account = { init, load, update, open, token, forceRefresh, blocked, relabel: paint, info: () => info };

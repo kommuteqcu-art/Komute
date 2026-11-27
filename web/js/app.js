@@ -63,6 +63,7 @@
 
   function setLanguage(lang) {
     K.setLang(lang);
+    K.theme.apply();
     document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === K.lang)));
     K.guide.relabel(); K.fares.relabel(); K.saved.init(); K.home.relabel(); K.results.relabel(); K.feedback.relabel(); if (K.account) K.account.relabel();
   }
