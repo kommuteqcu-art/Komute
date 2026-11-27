@@ -10,7 +10,7 @@
   --bs-body-color: var(--k-ink); --bs-body-bg: var(--k-cream);
   --tabbar-h: 0px;
 }
-@media (max-width: 767.98px) { :root { --tabbar-h: calc(62px + env(safe-area-inset-bottom)); } }
+@media (max-width: 991.98px) { :root { --tabbar-h: calc(62px + env(safe-area-inset-bottom)); } }
 body { background: var(--k-cream); padding-bottom: var(--tabbar-h); font-size: 1.02rem; }
 .text-muted { color: var(--k-muted) !important; }
 h1, h2, h3, h4, h5, .k-brand, .k-title { font-family: "Bricolage Grotesque", "Figtree", sans-serif; }
@@ -39,10 +39,11 @@ summary:focus-visible, [role="tabpanel"]:focus-visible { outline: 2px solid var(
   padding-top: env(safe-area-inset-top); }
 .k-brand { display: flex; align-items: center; gap: .55rem; color: #fff; text-decoration: none; font-weight: 800; font-size: 1.5rem; letter-spacing: -.02em; }
 .k-brand img { flex: none; }
-.k-brand span { overflow: hidden; text-overflow: ellipsis; }
+.k-brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .k-brand:hover { color: #fff; }
 .k-header-actions { display: flex; flex: none; align-items: center; gap: .5rem; }
-.k-nav .nav-link { color: #cfe8e0; border-radius: 999px; padding: .4rem .9rem; }
+.k-nav { flex-wrap: nowrap; }
+.k-nav .nav-link { color: #cfe8e0; border-radius: 999px; padding: .4rem .9rem; white-space: nowrap; }
 .k-nav .nav-link:hover { color: #fff; }
 .k-nav .nav-link.active { background: #ffffff22; color: #fff; font-weight: 700; }
 .k-nav .nav-link i { margin-right: .35rem; }

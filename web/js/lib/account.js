@@ -321,6 +321,7 @@
         .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
       const url = new URL(info.google);
       url.searchParams.set("redirect_to", new URL(googleCallback, location.origin).href);
+      url.searchParams.set("prompt", "select_account");
       url.searchParams.set("code_challenge", challenge);
       url.searchParams.set("code_challenge_method", "s256");
 
