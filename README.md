@@ -52,6 +52,12 @@ which checks the payment with PayMongo and adds 30 or 365 days. Optional backup:
 `checkout_session.payment.paid` pointing to `https://YOUR-SITE/api/paymongo-webhook`.
 For real money (`sk_live_`), PayMongo needs a registered business (DTI) within 30 days of activation.
 
+### Google sign-in on localhost
+
+1. In `backend/.env`, set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, and `GOOGLE_LOGIN=on`. Get the URL and keys from the Supabase project with the Google provider enabled and the Komute schema installed. Keep the secret key in the backend environment.
+2. In Supabase, open **Authentication → URL Configuration → Redirect URLs** and add `http://localhost:8080/auth/callback`. Use the exact host and port you open in the browser. Keep your deployed site as the **Site URL**. [Supabase redirect URL documentation](https://supabase.com/docs/guides/auth/redirect-urls)
+3. Restart the local server with `npm start`. Open [Komute on localhost](http://localhost:8080/) and choose **Sign in → Continue with Google**.
+
 ## What's new in Version 18
 
 | Change | Where |

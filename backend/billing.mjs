@@ -211,8 +211,9 @@ function accountView(user, sub) {
 }
 export async function account(request) {
   if (!billingOn) return { billing: false };
+  const google = googleUrl();
   const user = await userFrom(request);
-  if (!user) return { billing: true, signedIn: false, google: googleUrl(), freeLimit: FREE_PLANS, prices: { month: PLANS.month.php, year: PLANS.year.php }, payMode: payMode() };
+  if (!user) return { billing: true, signedIn: false, google, freeLimit: FREE_PLANS, prices: { month: PLANS.month.php, year: PLANS.year.php }, payMode: payMode() };
   const view = accountView(user, await getSub(user.id));
   if (manualOn) {
     await expirePending().catch(() => {});
@@ -225,7 +226,7 @@ export async function account(request) {
   }
   // A missing payment_requests table must never break sign-in: the account still loads, only the new payment screen waits for the SQL
   if (manualOn && VERIFY) { try { view.request = await openRequest(user.id); } catch (e) { view.request = null; console.warn("payment_requests not ready:", e.publicMessage || e.message); } }
-  return { billing: true, signedIn: true, ...view };
+  return { billing: true, signedIn: true, google, ...view };
 }
 
 // Before a route plan: must be signed in, and premium or still has free plans.
