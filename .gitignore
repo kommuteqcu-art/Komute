@@ -1,0 +1,11 @@
+# Never upload your keys
+.env
+*.env
+.env.txt
+backend/.env
+node_modules/
+backend/feedback.jsonl
+backend/transit-cache.json
+backend/env
+env
+backend/qc-boundary.json
