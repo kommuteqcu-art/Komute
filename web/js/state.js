@@ -2,9 +2,9 @@
 // plus saved places and recent trips kept on this phone/browser.
 (function (K) {
   K.state = {
-    origin: "Quezon City Hall, Quezon City",
+    origin: "",
     destination: "",
-    originPoint: { latitude: 14.6466, longitude: 121.0496, label: "Quezon City Hall, Quezon City" },
+    originPoint: null,
     destinationPoint: null,
     newCommuterMode: K.store.get("newCommuter", true),
     requested: false,

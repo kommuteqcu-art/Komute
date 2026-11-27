@@ -1,12 +1,14 @@
 // Trip map tabs (Commute / Drive / Walk / Bike): road paths, alternative routes, turn list, Start navigation.
-// Road paths come from OpenStreetMap routing. They show roads, not jeepney/bus/train lines.
+// Road paths are separate from the public-transit itineraries.
 (function (K) {
   const S = K.state, $ = (id) => document.getElementById(id);
   const TRAVEL = { drive: "driving", walk: "walking", bike: "bicycling" };
   let km, mode = "commute", pts = null, routes = {}, sel = 0, run = 0;
+  let commute = { options: [], selected: 0 };
 
-  // Turn instruction text for one OSRM step, in the chosen language.
+  // Google supplies localized instructions, while OSRM steps use Komute's translations.
   function say(s) {
+    if (s.instructions) return s.instructions;
     const m = s.maneuver, name = s.name || "";
     if (m.type === "depart") return name ? K.t("turn.departOn", { n: name }) : K.t("turn.depart");
     if (m.type === "arrive") return K.t("turn.arrive");
@@ -28,22 +30,72 @@
     return `https://www.google.com/maps/dir/?api=1&origin=${q(pts && pts[0], S.origin)}&destination=${q(pts && pts[1], S.destination)}&travelmode=${travel}${nav ? "&dir_action=navigate" : ""}`;
   }
 
-  async function fetchRoutes(m) {
-    const r = await K.api.roadRoutes(m, pts[0], pts[1], true);
-    return (routes[m] = r);
+  function transitPath(option, endpoints) {
+    const valid = (p) => p && Number.isFinite(p[0]) && Number.isFinite(p[1]);
+    const segments = [];
+    let previous = endpoints?.[0] && K.geo.ll(endpoints[0]);
+    const addLink = (from, to) => {
+      if (valid(from) && valid(to) && (from[0] !== to[0] || from[1] !== to[1])) {
+        segments.push({ coordinates: [from, to], dashed: true });
+      }
+    };
+    for (const step of option.steps) {
+      if (step.kind !== "ride") continue;
+      const coordinates = (step.path || [
+        step.fromPt && [step.fromPt.lng, step.fromPt.lat], step.toPt && [step.toPt.lng, step.toPt.lat]
+      ]).filter(valid);
+      if (coordinates.length < 2) { previous = null; continue; }
+      addLink(previous, coordinates[0]);
+      segments.push({ coordinates });
+      previous = coordinates[coordinates.length - 1];
+    }
+    if (!segments.length) return null;
+    if (endpoints?.[1]) addLink(previous, K.geo.ll(endpoints[1]));
+    return { segments };
+  }
+
+  function renderCommute(fit = false) {
+    const { options, selected, onPick } = commute;
+    const endpoints = S.ai.guide?.endpoints || pts;
+    const rendered = options.map((o) => o.steps.some((s) => s.door) ? routes.drive?.[0] || null : transitPath(o, endpoints));
+    $("mapFareValue").textContent = options[selected]?.fare || "";
+    $("mapRouteNote").classList.toggle("d-none", !km || !rendered[selected]?.segments);
+    if (!km) return;
+    km.setRoutes(rendered, selected, { labels: false, onPick });
+    if (fit && rendered[selected]) {
+      km.fitRoute(rendered[selected], { top: 150, bottom: 40, left: 36, right: 44 });
+    }
+  }
+
+  function setCommute(options, selected, onPick) {
+    commute = { options, selected, onPick };
+    const endpoints = S.ai.guide?.endpoints;
+    if (km && endpoints && options.length) km.setEndpoints(...endpoints, { fit: false });
+    if (mode === "commute") renderCommute(true);
   }
 
   function render() {
-    const faint = mode === "commute", list = routes[faint ? "drive" : mode] || [];
+    const isCommute = mode === "commute";
+    const list = routes[mode] || [];
     if (sel >= list.length) sel = 0;
-    if (km) {
-      km.setRoutes(faint ? list.slice(0, 1) : list, sel, { faint, onPick: (i) => { sel = i; render(); } });
-      if (!faint && list[sel]) km.fitRoute(list[sel], { top: 110, bottom: 60, left: 50, right: 50 });
+    if (isCommute) renderCommute(true);
+    else {
+      $("mapFareValue").textContent = "";
+      $("mapRouteNote").classList.add("d-none");
+      if (km) {
+        km.setRoutes(list, sel, { onPick: (i) => { sel = i; render(); } });
+        if (list[sel]) km.fitRoute(list[sel], { top: 150, bottom: 60, left: 50, right: 50 });
+      }
     }
-    $("panel-commute").classList.toggle("d-none", mode !== "commute");
-    $("panel-route").classList.toggle("d-none", mode === "commute");
-    document.querySelectorAll("[data-mode]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.mode === mode)));
-    if (mode !== "commute") summary(list);
+    $("panel-commute").classList.toggle("d-none", !isCommute);
+    $("panel-route").classList.toggle("d-none", isCommute);
+    document.querySelectorAll("[data-mode]").forEach((button) => {
+      const active = button.dataset.mode === mode;
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+      if (active && !isCommute) $("panel-route").setAttribute("aria-labelledby", button.id);
+    });
+    if (!isCommute) summary(list);
   }
 
   function summary(list) {
@@ -53,11 +105,15 @@
         <a class="btn btn-outline-primary rounded-pill" target="_blank" rel="noopener noreferrer" href="${gmaps(travel)}"><i class="bi bi-google"></i> ${K.esc(K.t("route.openGoogle"))}</a>`;
       return;
     }
-    const steps = r.legs[0].steps.map((s) => `<li><i class="bi ${turnIcon(s)}"></i><span>${K.esc(say(s))}</span><small>${K.fmt.dist(s.distance)}</small></li>`).join("");
+    const steps = r.legs[0].steps.map((s) => `<li><i class="bi ${turnIcon(s)}"></i><span>${K.esc(say(s))}</span>${s.distance ? `<small>${K.fmt.dist(s.distance)}</small>` : ""}</li>`).join("");
     const arrive = new Date(Date.now() + r.duration * 1000);
+    const trafficNote = r.trafficEstimate === "google" ? "route.googleTraffic"
+      : r.trafficEstimate === "junctions" ? "route.junctionDelays" : "route.noTraffic";
+    const warnings = (r.warnings || []).map((warning) => `<p class="small text-muted mt-2 mb-0">${K.esc(warning)}</p>`).join("");
     el.innerHTML = `<div class="k-route-sum">
         <div><span class="k-time">${K.fmt.mins(r.duration)}</span> <span class="fs-5 text-muted">· ${K.fmt.dist(r.distance)}</span></div>
-        <div class="small text-muted">${K.esc(K.t("route.arriveAt", { t: K.fmt.clock(arrive) }))} · ${K.esc(K.t(sel ? "route.alt" : "route.fastest"))}. ${K.esc(K.t("route.noTraffic"))}${list.length > 1 ? " " + K.esc(K.t("route.tapAlt")) : ""}</div>
+        <div class="small text-muted">${K.esc(K.t("route.arriveAt", { t: K.fmt.clock(arrive) }))} · ${K.esc(K.t(sel ? "route.alt" : "route.fastest"))}. ${K.esc(K.t(trafficNote))}${list.length > 1 ? " " + K.esc(K.t("route.tapAlt")) : ""}</div>
+        ${warnings}
       </div>
       <div class="k-route-actions">
         <button id="btnStartNav" type="button" class="btn btn-primary btn-lg rounded-pill"><i class="bi bi-cursor-fill"></i> ${K.esc(K.t("nav.start"))}</button>
@@ -82,26 +138,42 @@
     km = kmap;
     const me = ++run;
     routes = {}; sel = 0; S.road = null;
-    ["drive", "walk", "bike"].forEach((m) => { const t = $("t-" + m); if (t) t.textContent = "…"; });
+    pts = null;
+    Object.keys(TRAVEL).forEach((m) => { $("t-" + m).textContent = ""; });
+    let resolved;
     try {
-      const [a, b] = await Promise.all([K.fareEstimate.resolve(S.origin, S.originPoint), K.fareEstimate.resolve(S.destination, S.destinationPoint)]);
-      if (!a || !b) throw new Error("points");
-      pts = [a, b];
-    } catch { pts = null; }
+      const [a, b] = S.ai.guide?.endpoints || await Promise.all([K.fareEstimate.resolve(S.origin, S.originPoint), K.fareEstimate.resolve(S.destination, S.destinationPoint)]);
+      if (a && b) resolved = [a, b];
+    } catch { /* The guide can still supply endpoints when it arrives. */ }
     if (me !== run) return;
+    pts = S.ai.guide?.endpoints || resolved || null;
     $("lnkTransit").href = gmaps("transit");
     if (km) km.setEndpoints(pts && pts[0], pts && pts[1], { fit: !!pts });
-    if (!pts) { ["drive", "walk", "bike"].forEach((m) => { $("t-" + m).textContent = K.t("tab." + m); }); render(); return; }
-    await Promise.all(Object.keys(TRAVEL).map((m) => fetchRoutes(m).then(
-      (r) => { if (me === run) $("t-" + m).textContent = K.fmt.mins(r[0].duration); },
-      () => { if (me === run) $("t-" + m).textContent = "–"; })));
+    if (mode === "commute") renderCommute(true);
+    if (!pts) { render(); return; }
+    await Promise.all(Object.keys(TRAVEL).map((m) => K.api.roadRoutes(m, pts[0], pts[1], true).then(
+      (r) => {
+        if (me !== run) return;
+        routes[m] = r;
+        $("t-" + m).textContent = K.fmt.mins(r[0].duration);
+      },
+      () => {})));
     if (me !== run) return;
     if (routes.drive) {
       S.road = { km: routes.drive[0].distance / 1000, min: routes.drive[0].duration / 60 };
       K.fareEstimate.update($("resultsFare"));
+      if (K.planView.tab() === "taxi" && K.app.currentView() === "results" && S.ai.guide) K.results.render();
     }
     render();
   }
 
-  K.routeView = { show, setMode, say, turnIcon, points: () => pts, routes: () => routes, mode: () => mode };
+  function attachMap(map) {
+    km = map;
+    km.resize();
+    const endpoints = S.ai.guide?.endpoints || pts;
+    if (endpoints) km.setEndpoints(...endpoints);
+    render();
+  }
+
+  K.routeView = { show, attachMap, setMode, setCommute, say, turnIcon, points: () => pts, routes: () => routes, mode: () => mode };
 })(window.Komute);

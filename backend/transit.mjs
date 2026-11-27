@@ -7,11 +7,18 @@ import vm from "node:vm";
 
 // ---------- Load data ----------
 export function loadNetwork(webDir) {
-  const file = path.join(webDir || "", "js", "data", "routes.js");
-  if (!webDir || !fs.existsSync(file)) return null;
+  const data = loadWebData(webDir, ["routes.js"]);
+  return data.network ? buildNetwork(data.network) : null;
+}
+
+export function loadWebData(webDir, files) {
+  if (!webDir) return {};
   const sandbox = { window: {} };
-  vm.runInNewContext(fs.readFileSync(file, "utf8"), sandbox, { filename: file, timeout: 2000 });
-  return buildNetwork(sandbox.window.KOMUTE_DATA.network);
+  for (const name of files) {
+    const file = path.join(webDir, "js", "data", name);
+    if (fs.existsSync(file)) vm.runInNewContext(fs.readFileSync(file, "utf8"), sandbox, { filename: file, timeout: 2000 });
+  }
+  return sandbox.window.KOMUTE_DATA || {};
 }
 
 // Tricycle areas (registered TODAs) and areas with no tricycles, from routes.js. A gap with no tricycle is walked.
@@ -812,8 +819,16 @@ export function rideStep(net, leg, lang = "en") {
       check ? fill(t.signAsk, { s: leg.to.name.split("(")[0].trim() }) : "", ...notes].filter(Boolean).join(" "),
     routeIds: routes.map((x) => x.id), from: leg.from.key, to: leg.to.key,
     fromPt: { lat: leg.from.lat, lng: leg.from.lng }, toPt: { lat: leg.to.lat, lng: leg.to.lng },
+    path: ridePath(leg),
     verified: true, signCheck: check
   };
+}
+
+function ridePath({ route, i, j, dir, from, to }) {
+  const stops = route.stops.slice(Math.min(i, j) + 1, Math.max(i, j));
+  if (dir === 1) stops.reverse();
+  const between = stops.filter((stop) => served(stop, dir) && !stop.p.out).map((stop) => stop.p);
+  return [from, ...between, to].map(({ lng, lat }) => [lng, lat]);
 }
 
 // Motorcycle-taxi price for a short connecting trip (same formula as the Fares screen)
@@ -994,7 +1009,8 @@ export function fixRideStep(net, step, ctx) {
       vehicle: fixed.vehicle, vehicleLabel: fixed.vehicleLabel, signGroups: fixed.signGroups, fareRange: fixed.fareRange,
       where: fixed.where, getOff: fixed.getOff, fare: fixed.vehicle === "bus_both" || !step.fare ? fixed.fare : step.fare,
       tip: [step.tip, fixed.tip].filter(Boolean).join(" "),
-      routeIds: fixed.routeIds, from: fixed.from, to: fixed.to, fromPt: fixed.fromPt, toPt: fixed.toPt, verified: true, signCheck: fixed.signCheck };
+      routeIds: fixed.routeIds, from: fixed.from, to: fixed.to, fromPt: fixed.fromPt, toPt: fixed.toPt, path: fixed.path,
+      verified: true, signCheck: fixed.signCheck };
   }
   // Could not confirm. Flag signboards that name a road instead of a place (e.g. "QUIRINO HIGHWAY - NOVALICHES").
   const sign = String(step.sign || "");
@@ -1027,7 +1043,8 @@ export function closeGaps(net, steps, { origin, destination, lang = "en", origin
         const leg = end === "board" ? legWith(r, e, { idx: fixedIdx }) : legWith(r, { idx: fixedIdx }, e);
         if (leg) {
           const f = rideStep(net, leg, lang);
-          return { ...step, where: f.where, getOff: f.getOff, sign: f.sign, signs: f.signs, via: f.via, from: f.from, to: f.to, fromPt: f.fromPt, toPt: f.toPt };
+          return { ...step, where: f.where, getOff: f.getOff, sign: f.sign, signs: f.signs, via: f.via, from: f.from, to: f.to,
+            fromPt: f.fromPt, toPt: f.toPt, path: f.path };
         }
       }
     }

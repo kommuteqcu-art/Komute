@@ -5,7 +5,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadNetwork, findOptions, optionFromCandidate, describeForPrompt, fixRideStep, closeGaps, MAX_RIDES, rideLimit, planFare } from "./transit.mjs";
+import { loadNetwork, loadWebData, findOptions, optionFromCandidate, describeForPrompt, fixRideStep, closeGaps, MAX_RIDES, rideLimit, planFare } from "./transit.mjs";
 import * as billing from "./billing.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +28,7 @@ const SERVICE_AREA = { name: "Quezon City", west: 120.98, east: 121.14, south: 1
 const WEB_DIR = findWebDir();
 let NET = null; // Komute route data (web/js/data/routes.js)
 try { NET = loadNetwork(WEB_DIR); } catch (e) { console.warn("Route data (web/js/data/routes.js) could not be loaded:", e.message); }
+const LOCAL_PLACES = bundledPlaces(loadWebData(WEB_DIR, ["places.js", "schools.js", "transit.js"]));
 const MIME = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
@@ -64,6 +65,14 @@ const server = http.createServer(async (request, response) => {
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     if (request.method === "OPTIONS") { response.writeHead(204); return response.end(); }
     const url = new URL(request.url, "http://localhost");
+
+    if (request.method === "GET" && url.pathname === "/api/map-config") {
+      response.setHeader("Cache-Control", "no-store");
+      return json(response, 200, {
+        browserKey: (process.env.GOOGLE_MAPS_BROWSER_KEY || "").trim(),
+        mapId: (process.env.GOOGLE_MAP_ID || "").trim() || "DEMO_MAP_ID"
+      });
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       return json(response, 200, {
@@ -141,7 +150,58 @@ if (process.argv.includes("--check-ai")) {
 async function placesEndpoint(response, body) {
   const query = cleanText(body.query, 180);
   if (!query) return json(response, 400, { error: "Enter a place to search." });
-  return json(response, 200, { suggestions: await searchNominatim(query, body.near) });
+  return json(response, 200, { suggestions: await findPlaces(query, body.near) });
+}
+
+function placeKey(value) {
+  return String(value || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ").replace(/(?:^|\s)quezon city\s*$/, "").trim();
+}
+
+function bundledPlaces(data) {
+  const landmarkAliases = {
+    "Quezon City Hall": ["QC Hall", "QC City Hall"],
+    "Quezon Memorial Circle": ["QMC", "QC Circle"],
+    "Araneta City (Cubao)": ["Cubao", "Araneta City"],
+    "SM North EDSA": ["SM North", "SM City North EDSA"]
+  };
+  const entries = [
+    ...(data.landmarks || []).map((place) => ({
+      ...place, aliases: landmarkAliases[place.name], label: place.name + ", Quezon City", kind: "landmark"
+    })),
+    ...(data.schools || []).map((place) => ({ ...place, label: place.address, kind: "place" })),
+    ...(data.transit?.stations || []).map(({ name, line, lat, lng }) =>
+      ({ name: name + " " + line, label: name + " " + line + ", Quezon City", aliases: [line + " " + name], lat, lng, kind: "place" })),
+    ...Object.values(NET?.points || {}).map((place) => ({ ...place, label: place.name + ", Quezon City", kind: "place" }))
+  ];
+  return entries.filter(({ lat, lng }) => Number.isFinite(lat) && Number.isFinite(lng))
+    .map(({ name, label, lat, lng, kind, aliases = [], approx }) => ({
+      keys: [name, ...aliases, label].map(placeKey).filter(Boolean),
+      suggestion: { name, label, sub: label, kind, location: { latitude: lat, longitude: lng }, approx: approx || kind === "place" }
+    }));
+}
+
+function bundledMatches(query, exactOnly = false) {
+  const key = placeKey(query);
+  if (key.length < 2) return [];
+  return LOCAL_PLACES.filter(({ suggestion }) => insideServiceArea(suggestion.location))
+    .map(({ keys, suggestion }) => ({ suggestion,
+      rank: keys.includes(key) ? 2 : keys.some((name) => name.startsWith(key + " ")) ? 1 : 0 }))
+    .filter(({ rank }) => rank >= (exactOnly ? 2 : 1))
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, 6).map(({ suggestion }) => suggestion);
+}
+
+async function findPlaces(query, near, exactOnly = false) {
+  const local = bundledMatches(query, true);
+  if (local.length) return local;
+  if (!exactOnly) {
+    const partial = bundledMatches(query);
+    if (partial.length) return partial;
+  }
+  const remote = await searchNominatim(query, near).catch(() => []);
+  if (remote.length) return remote;
+  return photonAutocomplete(query, near).catch(() => []);
 }
 
 async function reverseEndpoint(response, body) {
@@ -161,7 +221,7 @@ async function reverseEndpoint(response, body) {
   url.searchParams.set("zoom", "18");
   url.searchParams.set("lat", String(lat));
   url.searchParams.set("lon", String(lon));
-  const data = await throttledNominatimFetch(url);
+  const data = await throttledNominatimFetch(url).catch(() => null);
   const full = cleanText(data?.display_name, 240);
   const value = full
     ? { label: full, inArea: full.toLowerCase().includes("quezon city") }
@@ -207,6 +267,8 @@ const OVERPASS_URLS = splitList(process.env.OVERPASS_URLS || "https://overpass-a
 const ROUTE_TYPES = '"^(bus|share_taxi|minibus|trolleybus)$"';
 const tripCache = new Map();
 let pointsCache = null; // { at, data }
+let pointsRefresh = null;
+let pointsRefreshAt = 0;
 const POINTS_FILE = path.join(HERE, "transit-cache.json");
 
 async function overpass(query, timeoutMs) {
@@ -314,11 +376,24 @@ function transitForPrompt(t, hints) {
 }
 
 // All mapped transit points in and around Quezon City, for the map layer (cached 24 h).
-async function transitPointsEndpoint(response) {
+function transitPointsEndpoint(response) {
   if (!pointsCache) {
     try { pointsCache = JSON.parse(fs.readFileSync(POINTS_FILE, "utf8")); } catch { pointsCache = null; }
   }
-  if (pointsCache && Date.now() - pointsCache.at < 24 * 3600 * 1000) return json(response, 200, pointsCache.data);
+  const now = Date.now();
+  if (!pointsRefresh && now - pointsRefreshAt > 5 * 60 * 1000 && (!pointsCache || now - pointsCache.at >= 24 * 3600 * 1000)) {
+    pointsRefreshAt = now;
+    pointsRefresh = refreshTransitPoints().finally(() => { pointsRefresh = null; });
+  }
+  if (pointsCache) return json(response, 200, pointsCache.data);
+  const features = Object.values(NET?.points || {}).filter((p) => !p.out && insideQC(p.lat, p.lng)).map((p) => ({
+    type: "Feature", geometry: { type: "Point", coordinates: [p.lng, p.lat] },
+    properties: { k: "stop", n: p.name, r: "" }
+  }));
+  return json(response, 200, { type: "FeatureCollection", features, source: "Komute route data" });
+}
+
+async function refreshTransitPoints() {
   const bb = `${SERVICE_AREA.south - 0.01},${SERVICE_AREA.west - 0.01},${SERVICE_AREA.north + 0.01},${SERVICE_AREA.east + 0.01}`;
   const q = `[out:json][timeout:90];
 (
@@ -347,11 +422,8 @@ out center tags;`;
     const out = { type: "FeatureCollection", features, source: "© OpenStreetMap contributors", at: new Date().toISOString() };
     pointsCache = { at: Date.now(), data: out };
     try { fs.writeFileSync(POINTS_FILE, JSON.stringify(pointsCache)); } catch { /* read-only disk is fine */ }
-    return json(response, 200, out);
   } catch (e) {
     console.warn("Transit points failed:", e.message);
-    if (pointsCache) return json(response, 200, pointsCache.data); // old copy is better than nothing
-    return json(response, 503, { error: "Transit map data is not reachable right now. Try again in a minute." });
   }
 }
 
@@ -430,6 +502,8 @@ async function autocompleteEndpoint(response, body, debug = false) {
   const query = cleanText(body.query, 120);
   if (query.length < 2) return json(response, 200, { suggestions: [] });
   const near = validCoordinate(body.near) ? { latitude: Number(body.near.latitude), longitude: Number(body.near.longitude) } : null;
+  const local = bundledMatches(query);
+  if (!debug && bundledMatches(query, true).length) return json(response, 200, { suggestions: local, provider: "komute" });
   const key = `${query.toLowerCase()}|${near ? near.latitude.toFixed(2) + "," + near.longitude.toFixed(2) : ""}`;
   const hit = acCache.get(key);
   if (hit && Date.now() - hit.at < 30 * 60 * 1000) return json(response, 200, { suggestions: hit.value, provider: hit.provider });
@@ -458,6 +532,7 @@ async function autocompleteEndpoint(response, body, debug = false) {
     } catch { /* fine */ }
   }
   list = withHouseNumber(query, list).slice(0, 10);
+  if (!list.length && local.length) { list = local; used = "komute"; }
   if (debug) return json(response, 200, { query, provider: used, problems, suggestions: list });
   // only remember good answers, so a short outage is not cached
   if (list.length) acCache.set(key, { at: Date.now(), value: list, provider: used });
@@ -656,52 +731,62 @@ async function commutePlanEndpoint(request, response, body) {
   const pass = await billing.gate(request); // null when accounts are switched off
   const beginnerMode = body.beginnerMode !== false;
   const language = body.language === "tl" ? "tl" : "en";
-  // Typed places without a map pin: look them up so the route data can be used.
-  for (const p of [origin, destination]) {
-    if (!p.location) {
-      const hit = (await searchNominatim(p.text, null).catch(() => []))[0];
-      if (hit) p.location = hit.location;
-    }
+  // Resolve typed places before planning so a missing location gets an actionable error.
+  await Promise.all([origin, destination].map(async (p) => {
+    if (p.location) return;
+    const hit = (await findPlaces(p.text, null, true)).find((place) =>
+      validCoordinate(place.location) && insideServiceArea(place.location));
+    if (hit) p.location = hit.location;
+  }));
+  if (!origin.location || !destination.location) {
+    const missingStart = !origin.location;
+    throw publicError(400, language === "tl"
+      ? `Pumili ng mungkahi o maglagay ng pin sa mapa para sa ${missingStart ? "pinanggagalingan" : "destinasyon"} sa Quezon City.`
+      : `Select a suggestion or pin the ${missingStart ? "starting point" : "destination"} on the map in Quezon City.`);
   }
-  const found = NET && origin.location && destination.location ? findOptions(NET, origin.location, destination.location) : null;
-  const busHints = (Array.isArray(body.busHints) ? body.busHints : []).map((h) => cleanText(h, 120)).filter(Boolean).slice(0, 6);
-  const withLimit = (p, ms) => Promise.race([p, new Promise((ok) => setTimeout(() => ok(null), ms))]);
 
-  let generated = null, aiError = null, transit = null;
-  if (PROVIDERS.length) {
+  const found = NET ? findOptions(NET, origin.location, destination.location) : null;
+  const guideOptions = { found, language, origin, destination };
+  let guide = assembleGuide(guideOptions);
+  const hasPlan = () => guide.categories.some((c) => c.options.length);
+  let generated = null, transit = null;
+  if (!hasPlan() && PROVIDERS.length) {
+    const busHints = (Array.isArray(body.busHints) ? body.busHints : []).map((h) => cleanText(h, 120)).filter(Boolean).slice(0, 6);
+    const withLimit = (p, ms) => Promise.race([p, new Promise((ok) => setTimeout(() => ok(null), ms))]);
     let communityTips;
     [communityTips, transit] = await Promise.all([
       searchRedditTips(`${origin.text} ${destination.text}`).catch((e) => { console.warn("Optional Reddit search unavailable:", e.message); return []; }),
       withLimit(tripTransit(origin.location, destination.location).catch((e) => { console.warn("Transit lookup failed:", e.message); return null; }), 16000)
     ]);
     const prompt = buildPrompt({ origin, destination, beginnerMode, language, communityTips, found, transitText: transitForPrompt(transit, busHints) });
-    try { generated = await generatePlan(prompt, origin.location); } catch (e) { aiError = e; console.warn("AI plan failed:", e.publicMessage || e.message); }
-  } else {
-    aiError = publicError(503, missingKeyMessage());
+    try {
+      const result = await generatePlan(prompt, origin.location);
+      const aiGuide = parseGuide(result.text);
+      if (aiGuide) {
+        const fallback = assembleGuide({ ...guideOptions, aiGuide });
+        if (fallback.categories.some((c) => c.options.length)) {
+          guide = fallback;
+          generated = result;
+        }
+      }
+    } catch (e) {
+      console.warn("Optional AI plan failed:", e.publicMessage || e.message);
+    }
   }
 
-  const aiGuide = generated ? parseGuide(generated.text) : null;
-  const guide = assembleGuide({ aiGuide, found, language, origin, destination });
-  const hasPlan = guide.categories.some((c) => c.options.length);
-  if (!hasPlan) {
-    if (!(origin.location && destination.location)) {
-      if (aiError) throw aiError;
-      throw publicError(502, "The AI did not return a usable plan. Please try again.");
-    }
+  if (!hasPlan()) {
+    if (!NET) throw publicError(503, language === "tl"
+      ? "Hindi ma-load ang route data ng Komute. Subukan ulit mamaya."
+      : "Komute's route data is unavailable. Please try again later.");
     // No public transport found: the app shows taxi and ride-hailing instead
     guide.noPublic = true;
-  }
-  if (!aiGuide) {
-    guide.notice = language === "tl"
-      ? "Ginawa ang planong ito mula sa route data ng Komute dahil hindi available ang AI ngayon." + (aiError ? ` (${aiError.publicMessage || aiError.message})` : "")
-      : "This plan was made from Komute's route data because the AI is not available right now." + (aiError ? ` (${aiError.publicMessage || aiError.message})` : "");
   }
   const sources = generated ? extractMapsSources(generated.data) : [];
   const account = await billing.count(pass).catch((e) => { console.warn("Could not count the free plan:", e.message); return null; });
   return json(response, 200, {
     account,
     plan: guideToText(guide),
-    guide,
+    guide: { ...guide, endpoints: [origin.location, destination.location] },
     language,
     model: generated ? generated.model : "komute-route-data",
     usedMapsGrounding: sources.length > 0,
@@ -1453,8 +1538,7 @@ function parseEndpoint(endpoint, name) {
   if (!text) throw publicError(400, `Select or enter a valid ${name}.`);
   const location = validCoordinate(endpoint?.location)
     ? { latitude: Number(endpoint.location.latitude), longitude: Number(endpoint.location.longitude) } : null;
-  const namedInArea = text.toLowerCase().includes("quezon city");
-  if (!namedInArea && !(location && insideServiceArea(location))) {
+  if (location && !insideServiceArea(location)) {
     throw publicError(400, `Komute covers ${SERVICE_AREA.name} only. Choose a ${name} inside ${SERVICE_AREA.name}.`);
   }
   return { text, location };
@@ -1469,7 +1553,6 @@ const NOMINATIM_BASE = (process.env.NOMINATIM_BASE || "https://nominatim.openstr
 const QC_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "qc-boundary.json");
 let qcGeometry = null;        // GeoJSON Polygon / MultiPolygon, or null until it was loaded
 let qcLoading = null;
-let qcLastError = "";
 function pointInRing(lon, lat, ring) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -1518,15 +1601,14 @@ async function loadQcBoundary() {
     try { fs.writeFileSync(QC_FILE, JSON.stringify(qcGeometry)); } catch { /* read-only disk is fine */ }
     console.log("Quezon City border loaded.");
     return qcGeometry;
-  })().catch((e) => { console.warn("Could not load the Quezon City border (using the rough box):", e.message); qcLastError = e.message; return null; })
+  })().catch((e) => { console.warn("Could not load the Quezon City border (using the rough box):", e.message); return null; })
     .finally(() => { qcLoading = null; });
   return qcLoading;
 }
-async function qcBoundaryEndpoint(response) {
-  const g = await loadQcBoundary();
-  if (!g) return json(response, 503, { error: "The city border is not available right now.", why: qcLastError });
+function qcBoundaryEndpoint(response) {
+  if (!qcGeometry) return json(response, 200, { geometry: null });
   response.setHeader("Cache-Control", "public, max-age=86400");
-  return json(response, 200, { geometry: g });
+  return json(response, 200, { geometry: qcGeometry });
 }
 
 function haversineKm(a, b) {

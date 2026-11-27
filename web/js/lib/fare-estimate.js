@@ -2,6 +2,7 @@
 // Uses the road distance from the route when known, otherwise straight-line distance x 1.3.
 (function (K) {
   const S = K.state, cache = {};
+  const updates = new WeakMap();
 
   async function resolve(text, point) {
     if (point) return point;
@@ -90,13 +91,18 @@
 
   async function update(el) {
     if (!el) return;
+    const turn = {};
+    updates.set(el, turn);
     if (!S.destination.trim()) { el.innerHTML = ""; return; }
     el.innerHTML = `<div class="k-fare-est small text-muted"><span class="spinner-border spinner-border-sm"></span> ${K.esc(K.t("fare.estimating"))}</div>`;
     try {
-      const [a, b] = await Promise.all([resolve(S.origin, S.originPoint), resolve(S.destination, S.destinationPoint)]);
+      const endpoints = el.id === "resultsFare" && S.ai.guide?.endpoints;
+      const [a, b] = endpoints || await Promise.all([resolve(S.origin, S.originPoint), resolve(S.destination, S.destinationPoint)]);
+      if (updates.get(el) !== turn) return;
       if (!a || !b) throw new Error("no points");
       el.innerHTML = html(rows(a, b));
     } catch {
+      if (updates.get(el) !== turn) return;
       el.innerHTML = `<p class="small text-muted k-fare-est mb-0">${K.esc(K.t("fare.needPoints"))}</p>`;
     }
   }

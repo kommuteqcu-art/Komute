@@ -18,11 +18,10 @@
     { sel: ["#acctBtn"], key: "account" },
     { sel: ["#origin"], key: "origin", up: 1 },
     { sel: ["#btnLocate"], key: "locate" },
-    { sel: ["#btnPinStart", "#btnPickStart"], key: "pin" },
     { sel: ["#destination"], key: "dest", up: 1 },
+    { sel: ["#btnPinStart", "#btnPickStart", "#btnPin", "#btnPickDest"], key: "pin" },
     { sel: ["#btnSwapHome"], key: "swap" },
-    { sel: ["#planMapWrap"], key: "map" },
-    { sel: ["#newCommuter"], key: "style", up: 1 },
+    { sel: ["#planOptions"], key: "style" },
     { sel: ["#btnFind"], key: "find", last: true }
   ];
   const RESULTS = [
@@ -32,7 +31,7 @@
     { sel: [".k-opt[open] .k-signwrap"], key: "signs" },
     { sel: [".k-opt[open] .k-choices"], key: "choices" },
     { sel: [".k-opt[open] .k-alight"], key: "alight" },
-    { sel: ["#planTools"], key: "share" },
+    { sel: ["#routeExtras"], key: "share" },
     { sel: ["#tripMap"], key: "tripmap" },
     { sel: [".k-nav", ".k-tabbar"], key: "more", last: true }
   ];
@@ -66,23 +65,6 @@
   }
 
   // Welcome card: start the guide, or skip and use the app now
-  function welcome() {
-    frame();
-    ui.classList.add("is-center");
-    ui.querySelector(".k-tour-card").innerHTML = `
-      <div class="k-tour-logo"><i class="bi bi-signpost-2-fill"></i></div>
-      <h2 id="tourTitle" class="h5">${K.esc(K.t("tour.welcomeTitle"))}</h2>
-      <p>${K.esc(K.t("tour.welcomeText"))}</p>
-      <div class="k-tour-actions k-tour-actions-col">
-        <button type="button" class="btn btn-primary" data-tour="start"><i class="bi bi-play-circle"></i> ${K.esc(K.t("tour.start"))}</button>
-        <button type="button" class="btn btn-outline-secondary" data-tour="skip">${K.esc(K.t("tour.skipNow"))}</button>
-      </div>
-      <p class="k-tour-small">${K.esc(K.t("tour.later"))}</p>`;
-    ui.querySelector('[data-tour="start"]').onclick = () => run("plan");
-    ui.querySelector('[data-tour="skip"]').onclick = skip;
-    ui.querySelector('[data-tour="start"]').focus();
-  }
-
   function run(which) {
     part = which;
     if (which === "plan" && location.hash && location.hash !== "#plan") location.hash = "#plan";
@@ -161,21 +143,11 @@
     Object.assign(card.style, { top: `${top}px`, left: `${left}px` });
   }
 
-  // Shown once, to people who are new (first visit and not signed in)
-  function maybeStart() {
-    if (stage()) return;
-    const acc = K.account && K.account.info ? K.account.info() : null;
-    if (acc && acc.signedIn) { setStage("done"); return; }
-    if ((location.hash || "#plan") !== "#plan") return;
-    welcome();
-  }
-
   K.tour = {
     // Start from the beginning (button on the Guide screen and in the "New here?" box)
     start() { setStage(""); run("plan"); },
     // Part 2, the first time a plan appears after part 1
     onResults() { if (stage() === "results") setTimeout(() => { if (stage() === "results" && !ui) run("results"); }, 900); },
-    init() { setTimeout(maybeStart, 1500); },
     skip
   };
 })(window.Komute);

@@ -1,294 +1,354 @@
-// Vector map (MapLibre GL + OpenFreeMap tiles): sharp on phones, can rotate and tilt like Google/Apple Maps.
-// Every map is limited to Quezon City. This file wraps the map so the screens only call simple functions.
+// Google Maps adapter for the Plan and Results screens.
 (function (K) {
-  const cfg = window.KOMUTE_CONFIG || {};
   const QC_CENTER = [121.0437, 14.676];
-  let QC_BOUNDS = [[120.95, 14.55], [121.17, 14.82]]; // just around the city; made exact once the real border loads
-  let qcGeom = null;                                  // the real Quezon City border (GeoJSON), when loaded
-  const instances = new Set();
-  const STYLES = {
-    streets: cfg.MAP_STYLE || "https://tiles.openfreemap.org/styles/liberty",
-    light: "https://tiles.openfreemap.org/styles/positron",
-    satellite: {
-      version: 8,
-      sources: { sat: { type: "raster", tileSize: 256, maxzoom: 19, attribution: "Tiles © Esri",
-        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"] } },
-      layers: [{ id: "sat", type: "raster", source: "sat" }]
-    }
-  };
-  const STYLE_ORDER = ["streets", "light", "satellite"];
-  const PIN_SVG = `<svg viewBox="0 0 32 42" aria-hidden="true"><path d="M16 1C7.7 1 1 7.6 1 15.8 1 27 16 41 16 41s15-14 15-25.2C31 7.6 24.3 1 16 1z" fill="currentColor" stroke="#fff" stroke-width="2"/><circle cx="16" cy="16" r="6" fill="#fff"/></svg>`;
+  const STYLES = { streets: "roadmap", terrain: "terrain", satellite: "satellite" };
+  const COLORS = { "MRT-3": "#2563eb", "LRT-1": "#16a34a", "LRT-2": "#7e22ce", "EDSA Carousel": "#dc2626",
+    terminal: "#1d4ed8", jeepney: "#b45309", jeepstop: "#f59e0b", tricycle: "#15803d", uv: "#9d174d", train: "#6d28d9", stop: "#0ea5e9" };
+  let bounds = { west: 120.95, south: 14.55, east: 121.17, north: 14.82 };
+  let qcGeom, mapId, loading;
+  let authFailed = false;
+  const instances = [];
+
+  const coord = ([lng, lat]) => ({ lat, lng });
+  const point = ({ latitude: lat, longitude: lng }) => ({ lat, lng });
+  const literal = (p) => typeof p.toJSON === "function" ? p.toJSON() : p;
+
+  function fallback(el) {
+    el.innerHTML = '<div class="k-map-fallback" role="status"><i class="bi bi-map" aria-hidden="true"></i><p data-i18n="map.unsupported">' +
+      K.esc(K.t("map.unsupported")) + '</p></div>';
+  }
+
+  function load() {
+    return loading ||= loadGoogle().catch((error) => console.warn("Google Maps:", error.message));
+  }
+
+  async function loadGoogle() {
+    const base = (window.KOMUTE_CONFIG?.API_BASE || "").replace(/\/$/, "");
+    const response = await fetch(base + "/api/map-config", { signal: AbortSignal.timeout(3500) });
+    if (!response.ok) throw new Error("Map configuration could not be loaded");
+    const config = await response.json();
+    if (!config.browserKey) return;
+    mapId = config.mapId;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      const timeout = setTimeout(() => finish(new Error("Maps script timed out")), 7000);
+      function finish(error) {
+        clearTimeout(timeout);
+        window.komuteGoogleMapsReady = () => {};
+        if (error) { script.remove(); reject(error); }
+        else resolve();
+      }
+      window.gm_authFailure = () => {
+        authFailed = true;
+        for (const { el } of instances) fallback(el);
+        finish(new Error("Maps authorization failed"));
+      };
+      window.komuteGoogleMapsReady = () => finish();
+      const query = new URLSearchParams({ key: config.browserKey, v: "quarterly", libraries: "marker",
+        loading: "async", callback: "komuteGoogleMapsReady" });
+      script.src = "https://maps.googleapis.com/maps/api/js?" + query;
+      script.async = true;
+      script.onerror = () => finish(new Error("Maps script could not be loaded"));
+      document.head.append(script);
+    });
+  }
 
   function supported() {
-    if (!window.maplibregl) return false;
-    try { const c = document.createElement("canvas"); return !!(c.getContext("webgl2") || c.getContext("webgl")); } catch { return false; }
+    return !authFailed && !!window.google?.maps?.marker?.AdvancedMarkerElement;
   }
 
   function create(containerId, opts = {}) {
     const el = document.getElementById(containerId);
-    if (!supported()) {
-      el.innerHTML = `<div class="k-map-fallback"><i class="bi bi-map"></i><p>${K.esc(K.t("map.unsupported"))}</p></div>`;
-      return null;
-    }
-    let styleName = K.store.get("mapStyle", "streets");
-    if (!STYLES[styleName]) styleName = "streets";
-    const map = new maplibregl.Map({
-      container: el, style: STYLES[styleName], center: opts.center || QC_CENTER, zoom: opts.zoom || 12,
-      maxBounds: QC_BOUNDS, minZoom: 10, maxZoom: 19, attributionControl: { compact: true },
-      pitchWithRotate: true, dragRotate: true, touchZoomRotate: true
+    if (!supported()) { fallback(el); return null; }
+    const maps = google.maps;
+    const wrap = el.parentElement;
+    let style = K.store.get("mapStyle", "streets");
+    if (style === "light") style = "terrain";
+    if (!Object.hasOwn(STYLES, style)) style = "streets";
+
+    const map = new maps.Map(el, {
+      center: coord(opts.center || QC_CENTER), zoom: opts.zoom || 12, minZoom: 10, maxZoom: 19,
+      mapId, renderingType: "VECTOR", mapTypeId: STYLES[style],
+      restriction: { latLngBounds: bounds, strictBounds: false },
+      gestureHandling: "greedy", headingInteractionEnabled: true, tiltInteractionEnabled: true,
+      disableDefaultUI: true, zoomControl: !matchMedia("(max-width: 767px)").matches,
+      zoomControlOptions: { position: maps.ControlPosition.RIGHT_TOP }, clickableIcons: false
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), "top-right");
-    map.touchZoomRotate.enableRotation();
 
-    const state = { routes: null, me: null, onRouteClick: null };
-    const markers = { a: null, b: null, me: null, labels: [] };
+    const state = { transit: K.store.get("showTransit", false) };
+    const pins = {};
+    const lines = [];
+    const labels = [];
+    const listeners = new Map();
+    const info = new maps.InfoWindow({ maxWidth: 290 });
+    const accuracy = new maps.Circle({ fillColor: "#1a73e8", fillOpacity: 0.13, strokeWeight: 0, clickable: false });
+    const boundary = new maps.Data({ map, style: (f) => f.getProperty("mask")
+      ? { fillColor: "#e9eeeb", fillOpacity: 0.66, strokeWeight: 0, clickable: false, zIndex: 0 }
+      : { fillOpacity: 0, strokeColor: "#047857", strokeWeight: 2.5, clickable: false, zIndex: 1 } });
+    const transit = new maps.Data({ map, style: transitStyle });
+    let builtInStopsLoaded = false;
+    let transitPoints;
+    let me, pendingFit;
 
-    function beforeLabels() {
-      const layers = (map.getStyle() && map.getStyle().layers) || [];
-      const first = layers.find((l) => l.type === "symbol");
-      return first ? first.id : undefined;
+    function drawBoundary() {
+      map.setOptions({ restriction: { latLngBounds: bounds, strictBounds: false } });
+      boundary.forEach((feature) => boundary.remove(feature));
+      if (!qcGeom) return;
+      const polygons = qcGeom.type === "MultiPolygon" ? qcGeom.coordinates : [qcGeom.coordinates];
+      const outer = [[119, 13], [123, 13], [123, 16], [119, 16], [119, 13]];
+      boundary.addGeoJson({ type: "Feature", properties: { mask: true },
+        geometry: { type: "Polygon", coordinates: [outer, ...polygons.map((rings) => rings[0])] } });
+      boundary.addGeoJson({ type: "Feature", properties: {}, geometry: qcGeom });
+    }
+    instances.push({ el, drawBoundary });
+    drawBoundary();
+
+    function transitStyle(feature) {
+      const line = feature.getProperty("line");
+      const kind = feature.getProperty("k");
+      const zoom = map.getZoom() || 12;
+      const stop = kind === "stop" || kind === "jeepstop";
+      return { visible: !!state.transit && (!!line || zoom >= (stop ? 14.5 : 11.5)), zIndex: 3,
+        icon: { path: maps.SymbolPath.CIRCLE, scale: stop ? 4.5 : Math.min(8, Math.max(4, zoom - 8)),
+          fillColor: COLORS[line || kind] || "#444", fillOpacity: 1, strokeColor: "#fff", strokeWeight: 2 } };
     }
 
-    // Our route and accuracy layers are lost when the map style changes, so add them again on every style load.
-    // Grey out everything outside Quezon City and draw the city border
-    function addMask() {
-      if (!qcGeom || map.getSource("k-qc")) return;
-      const polys = qcGeom.type === "MultiPolygon" ? qcGeom.coordinates : [qcGeom.coordinates];
-      const world = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
-      map.addSource("k-qc-mask", { type: "geojson", data: { type: "Feature", geometry: { type: "Polygon", coordinates: [world, ...polys.map((p) => p[0])] } } });
-      map.addSource("k-qc", { type: "geojson", data: { type: "Feature", geometry: { type: "MultiPolygon", coordinates: polys } } });
-      const before = map.getLayer("k-routes-faint") ? "k-routes-faint" : undefined;
-      map.addLayer({ id: "k-qc-mask", type: "fill", source: "k-qc-mask", paint: { "fill-color": "#e9eeeb", "fill-opacity": 0.78 } }, before);
-      map.addLayer({ id: "k-qc-line", type: "line", source: "k-qc", paint: { "line-color": "#047857", "line-width": 2.5, "line-opacity": 0.9 } }, before);
+    function drawTransit() {
+      if (state.transit && !builtInStopsLoaded) {
+        const stations = (K.data().transit.stations || []).map((st) => ({
+          type: "Feature", geometry: { type: "Point", coordinates: [st.lng, st.lat] },
+          properties: { name: st.name, line: st.line }
+        }));
+        transit.addGeoJson({ type: "FeatureCollection", features: stations });
+        builtInStopsLoaded = true;
+      }
+      if (state.transit && K.transitPoints && transitPoints !== K.transitPoints) {
+        transitPoints = K.transitPoints;
+        transit.addGeoJson({ type: "FeatureCollection", features: transitPoints });
+      }
+      transit.setStyle(transitStyle);
     }
 
-    function addLayers() {
-      if (!map.getSource("k-routes")) {
-        map.addSource("k-routes", { type: "geojson", data: state.routes || empty() });
-        const before = beforeLabels();
-        map.addLayer({ id: "k-routes-faint", type: "line", source: "k-routes", filter: ["==", ["get", "faint"], 1],
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#5b7fd6", "line-width": 4, "line-opacity": 0.7, "line-dasharray": [1.5, 1.5] } }, before);
-        map.addLayer({ id: "k-routes-alt", type: "line", source: "k-routes",
-          filter: ["all", ["==", ["get", "sel"], 0], ["==", ["get", "faint"], 0]],
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#9db7ef", "line-width": 7 } }, before);
-        map.addLayer({ id: "k-routes-casing", type: "line", source: "k-routes", filter: ["==", ["get", "sel"], 1],
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#0b2f9e", "line-width": 11 } }, before);
-        map.addLayer({ id: "k-routes-main", type: "line", source: "k-routes", filter: ["==", ["get", "sel"], 1],
-          layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#2563eb", "line-width": 7 } }, before);
-        if (!state.bound) { // bind once; the layer keeps the same id after a style change
-          state.bound = true;
-          map.on("click", "k-routes-alt", (e) => {
-            const f = e.features && e.features[0];
-            if (f && state.onRouteClick) state.onRouteClick(f.properties.idx);
-          });
-          map.on("mouseenter", "k-routes-alt", () => { map.getCanvas().style.cursor = "pointer"; });
-          map.on("mouseleave", "k-routes-alt", () => { map.getCanvas().style.cursor = ""; });
-        }
-      }
-      if (!map.getSource("k-transit")) {
-        map.addSource("k-transit", { type: "geojson", data: transitData() });
-        map.addLayer({ id: "k-transit", type: "circle", source: "k-transit",
-          layout: { visibility: state.transit ? "visible" : "none" },
-          paint: { "circle-color": ["get", "color"], "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 4, 15, 8], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
-      }
-      if (!map.getSource("k-pt") && K.transitPoints) {
-        map.addSource("k-pt", { type: "geojson", data: { type: "FeatureCollection", features: K.transitPoints } });
-        const vis = state.transit ? "visible" : "none";
-        const color = ["match", ["get", "k"], "terminal", "#1d4ed8", "jeepney", "#b45309", "jeepstop", "#f59e0b", "tricycle", "#15803d",
-          "uv", "#9d174d", "train", "#6d28d9", "#0ea5e9"];
-        map.addLayer({ id: "k-pt-stops", type: "circle", source: "k-pt", minzoom: 14.5, filter: ["in", ["get", "k"], ["literal", ["stop", "jeepstop"]]],
-          layout: { visibility: vis }, paint: { "circle-color": color, "circle-radius": 4.5, "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 } });
-        map.addLayer({ id: "k-pt-major", type: "circle", source: "k-pt", minzoom: 11.5, filter: ["in", ["get", "k"], ["literal", ["terminal", "jeepney", "tricycle", "uv", "train"]]],
-          layout: { visibility: vis }, paint: { "circle-color": color, "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 16, 8], "circle-stroke-color": "#fff", "circle-stroke-width": 2 } });
-      }
-      if (!map.getSource("k-me-acc")) {
-        map.addSource("k-me-acc", { type: "geojson", data: state.me ? K.geo.circle(state.me.p, state.me.acc) : empty() });
-        map.addLayer({ id: "k-me-acc", type: "fill", source: "k-me-acc", paint: { "fill-color": "#1a73e8", "fill-opacity": 0.13 } });
-      }
-    }
-    map.on("style.load", () => { addLayers(); addMask(); });
-    instances.add({ map, addMask });
-    map.on("remove", () => { for (const i of instances) if (i.map === map) instances.delete(i); });
-
-    const empty = () => ({ type: "FeatureCollection", features: [] });
-    const LINE_COLOR = { "MRT-3": "#2563eb", "LRT-1": "#16a34a", "LRT-2": "#7e22ce", "EDSA Carousel": "#dc2626" };
-    const PT_COLOR = { terminal: "#1d4ed8", jeepney: "#b45309", jeepstop: "#f59e0b", tricycle: "#15803d", uv: "#9d174d", train: "#6d28d9", stop: "#0ea5e9" };
-    function transitData() {
-      return { type: "FeatureCollection", features: (K.data().transit.stations || []).map((st) => ({
-        type: "Feature", geometry: { type: "Point", coordinates: [st.lng, st.lat] },
-        properties: { name: st.name, line: st.line, color: LINE_COLOR[st.line] || "#444" } })) };
-    }
-    state.transit = K.store.get("showTransit", false);
-    // One tap handler: a station tap opens the station, any other tap goes to fn(e)
-    map.on("click", (e) => {
-      let hit = [];
-      try {
-        const layers = ["k-transit", "k-pt-major", "k-pt-stops"].filter((id) => map.getLayer(id));
-        if (state.transit && layers.length) hit = map.queryRenderedFeatures([[e.point.x - 9, e.point.y - 9], [e.point.x + 9, e.point.y + 9]], { layers });
-      } catch { hit = []; }
-      if (hit.length && state.onStation) {
-        const f = hit[0], p = f.properties, lngLat = { lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] };
-        // stations from our list have "line"; OpenStreetMap points have k (kind), n (name), r (routes)
-        state.onStation(p.line ? { ...p, kind: p.line === "EDSA Carousel" ? "carousel" : "train", lngLat }
-          : { name: p.n || K.t("pt." + p.k), line: K.t("pt." + p.k), color: PT_COLOR[p.k] || "#0ea5e9", kind: p.k, routes: p.r || "", lngLat });
-        return;
-      }
-      if (state.onTap) state.onTap(e);
+    transit.addListener("click", ({ feature, latLng }) => {
+      const lngLat = literal(latLng);
+      const line = feature.getProperty("line");
+      const kind = feature.getProperty("k");
+      state.onStation?.(line
+        ? { name: feature.getProperty("name"), line, color: COLORS[line] || "#444",
+          kind: line === "EDSA Carousel" ? "carousel" : "train", lngLat }
+        : { name: feature.getProperty("n") || K.t("pt." + kind), line: K.t("pt." + kind),
+          color: COLORS[kind] || "#0ea5e9", kind, routes: feature.getProperty("r") || "", lngLat });
     });
-    const ready = (fn) => (map.isStyleLoaded() ? fn() : map.once("load", fn));
-    const setData = (id, data) => { const s = map.getSource(id); if (s) s.setData(data); };
+    map.addListener("click", ({ latLng }) => { if (latLng) state.onTap?.({ lngLat: literal(latLng) }); });
+    map.addListener("zoom_changed", () => transit.setStyle(transitStyle));
+    info.addListener("close", () => wrap.classList.remove("k-pop-open"));
 
-    function pinEl(kind) {
-      const d = document.createElement("div");
-      d.className = "k-pin k-pin-" + kind;
-      d.innerHTML = PIN_SVG + `<b>${kind === "a" ? "A" : "B"}</b>`;
-      d.title = K.t(kind === "a" ? "map.pinA" : "map.pinB");
-      return d;
+    function marker(position, content, options) {
+      const pin = new maps.marker.AdvancedMarkerElement({ map, position, ...options });
+      pin.append(content);
+      return pin;
     }
+
+    // Keep the camera operations called by the existing views.
+    const camera = {
+      on(event, fn) {
+        const callbacks = listeners.get(event) || new Map();
+        if (!callbacks.has(fn)) callbacks.set(fn, map.addListener(event === "moveend" ? "idle" : event, fn));
+        listeners.set(event, callbacks);
+      },
+      off(event, fn) {
+        const callbacks = listeners.get(event);
+        callbacks?.get(fn)?.remove();
+        callbacks?.delete(fn);
+      },
+      getCenter: () => map.getCenter()?.toJSON() || coord(QC_CENTER),
+      getBearing: () => map.getHeading() || 0,
+      getZoom: () => map.getZoom() || 12,
+      easeTo({ center, zoom, bearing, pitch }) {
+        map.moveCamera({
+          ...(center && { center: Array.isArray(center) ? coord(center) : center }),
+          ...(zoom !== undefined && { zoom }),
+          ...(bearing !== undefined && { heading: bearing }),
+          ...(pitch !== undefined && { tilt: pitch })
+        });
+      }
+    };
 
     const api = {
-      map,
-      ready,
-      resize: () => map.resize(),
-
+      map: camera,
+      ready: (fn) => fn(),
+      resize() {
+        if (!pendingFit || !el.clientWidth || !el.clientHeight) return;
+        const fit = pendingFit;
+        pendingFit = null;
+        fit();
+      },
       setEndpoints(a, b, { fit = true } = {}) {
-        for (const [k, p] of [["a", a], ["b", b]]) {
-          if (!p) { if (markers[k]) { markers[k].remove(); markers[k] = null; } continue; }
-          if (!markers[k]) {
-            markers[k] = new maplibregl.Marker({ element: pinEl(k), anchor: "bottom", draggable: !!opts.draggable });
-            // drag a pin to fine-tune the exact spot (house, gate, corner)
-            markers[k].on("dragend", () => { if (state.onDrag) state.onDrag(k, markers[k].getLngLat()); });
+        for (const [kind, p] of [["a", a], ["b", b]]) {
+          if (!p) {
+            if (pins[kind]) { pins[kind].map = null; delete pins[kind]; }
+            continue;
           }
-          markers[k].setLngLat([p.longitude, p.latitude]).addTo(map);
+          if (pins[kind]) { pins[kind].position = point(p); continue; }
+          const content = document.createElement("div");
+          content.className = "k-pin k-pin-" + kind;
+          content.innerHTML = '<svg viewBox="0 0 32 42" aria-hidden="true"><path d="M16 1C7.7 1 1 7.6 1 15.8 1 27 16 41 16 41s15-14 15-25.2C31 7.6 24.3 1 16 1z" fill="currentColor" stroke="#fff" stroke-width="2"/><circle cx="16" cy="16" r="6" fill="#fff"/></svg>' +
+            (kind === "a" ? "<b>A</b>" : "<b>B</b>");
+          const title = K.t(kind === "a" ? "map.pinA" : "map.pinB");
+          const pin = marker(point(p), content, { gmpDraggable: !!opts.draggable, title, zIndex: 11 });
+          if (opts.draggable) pin.addEventListener("gmp-dragend", () => state.onDrag?.(kind, literal(pin.position)));
+          pins[kind] = pin;
         }
         if (fit) api.fit([a, b].filter(Boolean));
       },
-
       onPinDrag(fn) { state.onDrag = fn; },
       onTap(fn) { state.onTap = fn; },
       onStation(fn) { state.onStation = fn; },
-      // Show/hide train stations and EDSA Carousel stops
       setTransit(on, btn) {
         state.transit = !!on;
         K.store.set("showTransit", state.transit);
-        if (btn) btn.setAttribute("aria-pressed", String(state.transit));
-        const apply = () => {
-          addLayers();
-          ["k-transit", "k-pt-major", "k-pt-stops"].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", state.transit ? "visible" : "none"); });
-          const legend = map.getContainer().parentElement.querySelector(".k-legend");
-          if (legend) legend.classList.toggle("d-none", !state.transit);
-        };
-        ready(apply);
-        // load terminals, stops, TODA and jeepney terminals the first time
+        btn?.setAttribute("aria-pressed", String(state.transit));
+        const legend = wrap.querySelector(".k-legend");
+        const error = legend?.querySelector(".k-legend-err");
+        legend?.classList.toggle("d-none", !state.transit);
+        drawTransit();
         if (state.transit && !K.transitPoints) {
-          if (btn) btn.classList.add("k-loading-btn");
-          K.api.transitPoints().then(() => ready(apply)).catch(() => {
-            const legend = map.getContainer().parentElement.querySelector(".k-legend");
-            if (legend) legend.querySelector(".k-legend-err").classList.remove("d-none");
-          }).finally(() => btn && btn.classList.remove("k-loading-btn"));
+          error?.classList.add("d-none");
+          btn?.classList.add("k-loading-btn");
+          K.api.transitPoints().then(drawTransit).catch(() => error?.classList.remove("d-none"))
+            .finally(() => btn?.classList.remove("k-loading-btn"));
         }
       },
       transitOn: () => state.transit,
-
-      // A small info bubble on the map (used for "Start here / Go here")
       popup(lngLat, html) {
-        if (state.pop) state.pop.remove();
-        const wrap = map.getContainer().parentElement;
+        const content = document.createElement("div");
+        content.innerHTML = html;
+        info.setOptions({ position: lngLat, content });
+        info.open({ map, shouldFocus: false });
         wrap.classList.add("k-pop-open");
-        const pop = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "290px", offset: 8 })
-          .setLngLat(lngLat).setHTML(html).addTo(map);
-        if (pop.on) pop.on("close", () => { if (state.pop === pop) wrap.classList.remove("k-pop-open"); });
-        state.pop = pop;
-        return pop.getElement();
+        return content;
       },
       closePopup() {
-        if (state.pop) { state.pop.remove(); state.pop = null; }
-        map.getContainer().parentElement.classList.remove("k-pop-open");
+        info.close();
+        wrap.classList.remove("k-pop-open");
       },
-
       fit(points, { padding = 70, maxZoom = 16 } = {}) {
+        pendingFit = null;
         if (!points.length) return;
-        if (points.length === 1) { map.easeTo({ center: K.geo.ll(points[0]), zoom: 15, duration: 600 }); return; }
-        const lngs = points.map((p) => p.longitude), lats = points.map((p) => p.latitude);
-        map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
-          { padding: typeof padding === "number" ? { top: padding + 30, bottom: padding, left: padding, right: padding } : padding, maxZoom, duration: 700 });
+        if (!el.clientWidth || !el.clientHeight) {
+          pendingFit = () => api.fit(points, { padding, maxZoom });
+          return;
+        }
+        if (points.length === 1) { camera.easeTo({ center: point(points[0]), zoom: 15 }); return; }
+        const extent = new maps.LatLngBounds();
+        for (const p of points) extent.extend(point(p));
+        if (extent.getNorthEast().equals(extent.getSouthWest())) {
+          camera.easeTo({ center: extent.getCenter().toJSON(), zoom: maxZoom });
+          return;
+        }
+        const inset = typeof padding === "number" ? { top: padding + 30, bottom: padding, left: padding, right: padding } : padding;
+        state.fitListener?.remove();
+        state.fitListener = maps.event.addListenerOnce(map, "idle", () => {
+          if (map.getZoom() > maxZoom) map.setZoom(maxZoom);
+        });
+        map.fitBounds(extent, inset);
       },
-
-      // list = OSRM routes, sel = selected index, faint = show as dashed preview
-      setRoutes(list, sel, { faint = false, labels = true, onPick } = {}) {
-        state.onRouteClick = onPick || null;
-        state.routes = { type: "FeatureCollection", features: (list || []).map((r, i) => ({
-          type: "Feature", geometry: r.geometry, properties: { idx: i, sel: !faint && i === sel ? 1 : 0, faint: faint ? 1 : 0 } })) };
-        ready(() => { addLayers(); setData("k-routes", state.routes); });
-        markers.labels.forEach((m) => m.remove());
-        markers.labels = [];
-        if (!faint && labels && list) {
-          list.forEach((r, i) => {
-            const c = r.geometry.coordinates, mid = c[Math.floor(c.length / 2)];
+      setRoutes(list, selected, { faint = false, labels: showLabels = true, onPick } = {}) {
+        for (const line of lines.splice(0)) line.setMap(null);
+        for (const label of labels.splice(0)) label.map = null;
+        (list || []).forEach((route, index) => {
+          if (!route) return;
+          const segments = route.segments || [route.geometry];
+          const active = !faint && index === selected;
+          for (const segment of segments) {
+            const path = segment.coordinates.map(coord);
+            if (path.length < 2) continue;
+            const dashed = faint || segment.dashed;
+            const color = active ? "#2563eb" : "#7698df";
+            if (active && !dashed) lines.push(new maps.Polyline({
+              map, path, strokeColor: "#0b2f9e", strokeWeight: 11, clickable: false, zIndex: 5
+            }));
+            const line = new maps.Polyline({
+              map, path, strokeColor: color, strokeWeight: active ? 7 : 5,
+              strokeOpacity: dashed ? 0 : 1, clickable: !faint && !!onPick, zIndex: active ? 6 : 4,
+              ...(dashed && { icons: [{ icon: { path: "M 0,-1 0,1", strokeColor: color,
+                strokeOpacity: 0.85, strokeWeight: 3, scale: 2 }, repeat: "12px" }] })
+            });
+            lines.push(line);
+            if (!faint && onPick) line.addListener("click", () => onPick(index));
+          }
+          if (!faint && showLabels) {
+            const path = segments[0]?.coordinates || [];
+            if (!path.length) return;
             const tag = document.createElement("button");
             tag.type = "button";
-            tag.className = "k-eta" + (i === sel ? " on" : "");
-            tag.textContent = K.fmt.mins(r.duration);
-            tag.onclick = (e) => { e.stopPropagation(); if (onPick) onPick(i); };
-            markers.labels.push(new maplibregl.Marker({ element: tag }).setLngLat(mid).addTo(map));
-          });
-        }
+            tag.className = "k-eta" + (active ? " on" : "");
+            tag.textContent = K.fmt.mins(route.duration);
+            tag.onclick = (event) => { event.stopPropagation(); onPick?.(index); };
+            labels.push(marker(coord(path[Math.floor(path.length / 2)]), tag, { anchorTop: "-50%", zIndex: active ? 10 : 9 }));
+          }
+        });
       },
-
       fitRoute(route, padding) {
-        const c = route.geometry.coordinates;
-        api.fit(c.map(K.geo.pt), { padding: padding || 60, maxZoom: 17 });
+        const points = (route.segments || [route.geometry]).flatMap((segment) => segment.coordinates.map(K.geo.pt));
+        api.fit(points, { padding: padding || 60, maxZoom: 17 });
       },
-
-      // Blue "you are here" dot. heading (degrees) shows a direction cone, like Google Maps.
       setMe(p, acc, heading) {
-        if (!p) { if (markers.me) { markers.me.remove(); markers.me = null; } state.me = null; setData("k-me-acc", empty()); return; }
-        state.me = { p, acc: Math.min(acc || 20, 300) };
-        if (!markers.me) {
-          const d = document.createElement("div");
-          d.className = "k-me";
-          d.innerHTML = `<span class="k-me-cone"></span><span class="k-me-dot"></span>`;
-          markers.me = new maplibregl.Marker({ element: d, rotationAlignment: "map", pitchAlignment: "map" });
+        if (!p) {
+          if (me) { me.pin.map = null; me = null; }
+          accuracy.setMap(null);
+          return;
         }
-        markers.me.setLngLat(K.geo.ll(p)).addTo(map);
-        const el = markers.me.getElement();
-        el.classList.toggle("has-heading", typeof heading === "number");
-        if (typeof heading === "number") markers.me.setRotation(heading);
-        ready(() => { addLayers(); setData("k-me-acc", K.geo.circle(p, state.me.acc)); });
+        const position = point(p);
+        if (!me) {
+          const content = document.createElement("div");
+          content.className = "k-me";
+          content.innerHTML = '<span class="k-me-cone"></span><span class="k-me-dot"></span>';
+          me = { pin: marker(position, content, { anchorTop: "-50%", zIndex: 12 }), content };
+        }
+        me.pin.position = position;
+        me.heading = heading;
+        updateLocationHeading();
+        accuracy.setOptions({ map, center: position, radius: Math.min(acc || 20, 300) });
       },
-
-      // Round compass button: the needle always points north. Tap = face north again.
       bindCompass(btn, onTapWhenNorth) {
         if (!btn) return;
         const needle = btn.querySelector(".k-needle");
+        const rotated = () => Math.abs(camera.getBearing()) > 0.5 || (map.getTilt() || 0) > 1;
         const update = () => {
-          const b = map.getBearing();
-          if (needle) needle.style.transform = `rotate(${-b}deg)`;
-          btn.classList.toggle("rotated", Math.abs(b) > 0.5 || map.getPitch() > 1);
+          if (needle) needle.style.transform = "rotate(" + -camera.getBearing() + "deg)";
+          btn.classList.toggle("rotated", rotated());
         };
-        map.on("rotate", update);
-        map.on("pitch", update);
+        map.addListener("heading_changed", update);
+        map.addListener("tilt_changed", update);
         update();
         btn.onclick = () => {
-          if (Math.abs(map.getBearing()) > 0.5 || map.getPitch() > 1) map.easeTo({ bearing: 0, pitch: 0, duration: 500 });
-          else if (onTapWhenNorth) onTapWhenNorth();
+          if (rotated()) camera.easeTo({ bearing: 0, pitch: 0 });
+          else onTapWhenNorth?.();
         };
       },
-
-      // Cycles Streets -> Light -> Satellite
       nextStyle(btn) {
-        styleName = STYLE_ORDER[(STYLE_ORDER.indexOf(styleName) + 1) % STYLE_ORDER.length];
-        K.store.set("mapStyle", styleName);
-        map.setStyle(STYLES[styleName], { diff: false });
-        if (btn) api.labelStyle(btn);
+        const styles = Object.keys(STYLES);
+        style = styles[(styles.indexOf(style) + 1) % styles.length];
+        K.store.set("mapStyle", style);
+        map.setMapTypeId(STYLES[style]);
+        api.labelStyle(btn);
       },
-      labelStyle(btn) { if (btn) { btn.title = K.t("map.style." + styleName); btn.setAttribute("aria-label", btn.title); } },
-      styleName: () => styleName
+      labelStyle(btn) {
+        if (!btn) return;
+        btn.title = K.t("map.style." + style);
+        btn.setAttribute("aria-label", btn.title);
+      },
+      styleName: () => style
     };
+
+    function updateLocationHeading() {
+      if (!me) return;
+      const hasHeading = Number.isFinite(me.heading);
+      me.content.classList.toggle("has-heading", hasHeading);
+      me.content.style.rotate = hasHeading ? (me.heading - camera.getBearing()) + "deg" : "";
+    }
+    map.addListener("heading_changed", updateLocationHeading);
     return api;
   }
 
@@ -316,12 +376,10 @@
     let w = 180, s = 90, e = -180, n = -90;
     polys.forEach((p) => p[0].forEach(([x, y]) => { w = Math.min(w, x); e = Math.max(e, x); s = Math.min(s, y); n = Math.max(n, y); }));
     const pad = 0.012; // a little room around the edge so pins on the border still fit
-    QC_BOUNDS = [[w - pad, s - pad], [e + pad, n + pad]];
-    for (const i of instances) {
-      try { i.map.setMaxBounds(QC_BOUNDS); i.map.once("idle", () => {}); const go = () => i.addMask(); i.map.isStyleLoaded() ? go() : i.map.once("load", go); } catch { /* map was removed */ }
-    }
+    bounds = { west: w - pad, south: s - pad, east: e + pad, north: n + pad };
+    for (const instance of instances) instance.drawBoundary();
     document.dispatchEvent(new CustomEvent("komute:border"));
   }
 
-  K.maps = { create, supported, QC_CENTER, inQC, setBoundary };
+  K.maps = { create, load, supported, QC_CENTER, inQC, setBoundary };
 })(window.Komute);

@@ -40,10 +40,11 @@
     return VIEWS.includes(v) ? v : "plan";
   }
 
-  function route() {
+  function route(event) {
     const v = currentView();
     if (v === "results" && !S.requested) { location.hash = "#plan"; return; }
     if (v !== "results" && K.navigate.active()) K.navigate.stop();
+    if (v !== "plan") K.home.hide();
     VIEWS.forEach((name) => document.getElementById("view-" + name).classList.toggle("d-none", name !== v));
     document.body.dataset.view = v;
     const navKey = v === "results" ? "plan" : v;
@@ -53,6 +54,10 @@
       if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
     });
     ({ plan: K.home, results: K.results, saved: K.saved, guide: K.guide, fares: K.fares })[v].show();
+    if (event) {
+      const heading = document.querySelector(`#view-${v} h1`);
+      if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); }
+    }
     window.scrollTo(0, 0);
   }
 
@@ -74,11 +79,14 @@
     if (K.store.get("welcomeHidden", false)) box.classList.add("d-none");
     document.getElementById("btnWelcomeClose").onclick = () => { box.classList.add("d-none"); K.store.set("welcomeHidden", true); };
 
+    document.querySelector(".k-skip").onclick = (event) => {
+      event.preventDefault();
+      document.getElementById("main").focus();
+    };
     K.home.init(); K.results.init(); K.saved.init(); K.guide.init(); K.fares.init(); K.navigate.init(); K.feedback.init();
     try { if (K.account) K.account.init(); } catch (e) { console.warn("Account button not available:", e); }
-    // Step-by-step guide for new users: offered once (first visit, not signed in); "Show me around" starts it again
+    // The walkthrough starts when the user selects Show me around.
     document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-tour-start]"); if (b && K.tour) K.tour.start(); });
-    try { if (K.tour) K.tour.init(); } catch (e) { console.warn("Guide not available:", e); }
     window.addEventListener("hashchange", route);
     // Load the transit points in the background so terminals show up in search.
     K.api.loadBorder();

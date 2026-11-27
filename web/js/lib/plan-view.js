@@ -15,7 +15,7 @@
     { id: "commute", icon: "bi-stars" }, { id: "jeepney", icon: "bi-truck-front" }, { id: "bus", icon: "bi-bus-front" },
     { id: "uv_express", icon: "bi-car-front" }, { id: "taxi", icon: "bi-taxi-front" }
   ];
-  let tab = "commute";
+  let tab = "commute", selected = 0;
 
   // AI text sometimes uses other words for a mode; map them to our list.
   function normMode(m) {
@@ -130,9 +130,8 @@
     const chips = kinds.filter(([m, l]) => { const k = m + "|" + l; if (seenK.has(k) || !MODE[m]) return false; seenK.add(k); return true; })
       .map(([m, l]) => (l ? vehTag(m, l).replace("k-veh", "k-mode") : chip(m)));
     const tagKey = { cheapest: "tag.cheapest", fastest: "tag.fastest", easiest: "tag.easiest", "fewest transfers": "tag.fewest" }[String(o.tag || "").toLowerCase()];
-    return `<details class="k-opt"${i === 0 ? " open" : ""}>
+    return `<details class="k-opt${i === selected ? " is-selected" : ""}"${i === selected ? " open" : ""}>
       <summary>
-        <span class="k-opt-no">${i + 1}</span>
         <span class="k-opt-head">
           <span class="k-opt-title">${K.esc(o.title)}${tagKey ? ` <span class="k-tag">${K.esc(K.t(tagKey))}</span>` : ""}</span>
           <span class="k-modes">${(chips.length ? chips : modes.map(chip)).join("")}</span>
@@ -199,7 +198,7 @@
   // ---------- Taxi and ride-hailing (from fares and road distance) ----------
   function trip() {
     const f = K.data().fares.estimate;
-    const pts = K.routeView && K.routeView.points ? K.routeView.points() : null;
+    const pts = st().ai.guide?.endpoints || K.routeView?.points();
     const S = st();
     let km = S.road && S.road.km, min = S.road && S.road.min;
     if (!km && pts) km = (K.geo.dist(pts[0], pts[1]) / 1000) * f.roadDetourFactor;
@@ -262,10 +261,8 @@
 
   function tabs(cats) {
     return `<div class="k-cats" role="tablist" aria-label="${K.esc(K.t("cat.label"))}">${cats.map((c) => {
-      const o = c.options[0];
-      const meta = c.available ? (o && o.duration ? o.duration.replace(/^(about|mga)\s+/i, "") : "") : "–";
-      return `<button type="button" role="tab" class="k-cat${c.available ? "" : " is-off"}" data-cat="${c.id}" aria-selected="${c.id === tab}">
-        <i class="bi ${c.icon}"></i><span class="k-cat-name">${K.esc(K.t("cat." + c.id))}</span><small>${K.esc(meta)}</small></button>`;
+      return `<button type="button" role="tab" id="category-${c.id}" aria-controls="commuteCategory" class="k-cat${c.available ? "" : " is-off"}" data-cat="${c.id}" aria-selected="${c.id === tab}" tabindex="${c.id === tab ? 0 : -1}">
+        <i class="bi ${c.icon}" aria-hidden="true"></i><span class="k-cat-name">${K.esc(K.t("cat." + c.id))}</span></button>`;
     }).join("")}</div>`;
   }
 
@@ -302,13 +299,13 @@
       return K.planCards(ai.plan) || `<div class="k-plan">${K.planToHtml(ai.plan)}</div>`;
     }
     const cats = categories(ai);
-    if (!cats.some((c) => c.id === tab && c.available)) tab = (cats.find((c) => c.available && c.id !== "taxi") || cats[0]).id;
+    if (!cats.some((c) => c.id === tab)) { tab = cats[0].id; selected = 0; }
     return `${g.noPublic ? `<div class="alert k-warn small"><i class="bi bi-exclamation-circle"></i> ${K.esc(K.t("cat.noPublic"))}</div>` : ""}
       ${g.notice ? `<div class="alert k-info small"><i class="bi bi-info-circle"></i> ${K.esc(g.notice)}</div>` : ""}
       ${g.summary ? `<p class="k-intro">${K.esc(g.summary)}</p>` : ""}
       ${g.outsideArea ? `<div class="alert k-warn small"><i class="bi bi-exclamation-circle"></i> ${K.esc(g.outsideArea)}</div>` : ""}
       ${tabs(cats)}
-      <div class="k-catbody" role="tabpanel">${catBody(cats.find((c) => c.id === tab))}</div>
+      <div id="commuteCategory" class="k-catbody" role="tabpanel" aria-labelledby="category-${tab}" tabindex="0">${catBody(cats.find((c) => c.id === tab))}</div>
       ${g.tips && g.tips.length ? `<section class="k-guidebox mb-3"><h3 class="h6"><i class="bi bi-lightbulb-fill"></i> ${K.esc(K.t("plan.tips"))}</h3>
         <ul>${g.tips.map((x) => `<li>${K.esc(x)}</li>`).join("")}</ul></section>` : ""}
       ${g.checks && g.checks.length ? `<section class="k-checkbox"><h3 class="h6"><i class="bi bi-patch-check-fill"></i> ${K.esc(K.t("plan.checks"))}</h3>
@@ -316,15 +313,49 @@
   }
 
   // Tab clicks (call after putting render() into the page)
-  function bind(root, ai) {
+  function bind(root, ai, onSelect) {
+    function bindOptions(category) {
+      const options = category?.options || [];
+      const cards = [...root.querySelectorAll(".k-catbody > .k-opt")];
+      selected = Math.min(selected, Math.max(0, options.length - 1));
+      function select(index, reveal = false) {
+        if (!options[index]) return;
+        selected = index;
+        cards.forEach((card, i) => {
+          card.classList.toggle("is-selected", i === index);
+          const heading = card.querySelector("summary");
+          if (i === index) heading.setAttribute("aria-current", "true");
+          else heading.removeAttribute("aria-current");
+        });
+        if (reveal && cards[index]) cards[index].open = true;
+        onSelect?.(options, selected, (pick) => select(pick, true));
+      }
+      cards.forEach((card, i) => { card.querySelector("summary").onclick = () => select(i); });
+      if (options.length) select(selected);
+      else onSelect?.([], 0);
+    }
+
+    const tabList = root.querySelector(".k-cats");
+    if (tabList) K.bindTabs(tabList);
     root.querySelectorAll("[data-cat]").forEach((b) => {
       b.onclick = () => {
+        if (tab === b.dataset.cat) return;
         tab = b.dataset.cat;
+        selected = 0;
         const cats = categories(ai);
-        root.querySelectorAll("[data-cat]").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.cat === tab)));
-        root.querySelector(".k-catbody").innerHTML = catBody(cats.find((c) => c.id === tab));
+        const active = cats.find((c) => c.id === tab);
+        root.querySelectorAll("[data-cat]").forEach((x) => {
+          const current = x.dataset.cat === tab;
+          x.setAttribute("aria-selected", String(current));
+          x.tabIndex = current ? 0 : -1;
+        });
+        const panel = root.querySelector(".k-catbody");
+        panel.setAttribute("aria-labelledby", b.id);
+        panel.innerHTML = catBody(active);
+        bindOptions(active);
       };
     });
+    bindOptions(root.querySelector(".k-catbody") ? categories(ai).find((c) => c.id === tab) : null);
   }
 
   // Text version for sharing (SMS, Messenger, etc.)
@@ -348,5 +379,5 @@
     return lines.join("\n");
   }
 
-  K.planView = { render, bind, shareText, normMode, MODE, setTab: (t) => { tab = t; }, tab: () => tab };
+  K.planView = { render, bind, shareText, normMode, MODE, setTab: (t) => { tab = t; selected = 0; }, tab: () => tab };
 })(window.Komute);

@@ -110,5 +110,17 @@ window.Komute = window.Komute || {};
   K.store = store;
   K.geo = geo;
   K.fmt = fmt;
+  K.bindTabs = (list) => {
+    list.onkeydown = (event) => {
+      const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
+      const index = tabs.indexOf(event.target);
+      if (index < 0 || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+        : (index + tabs.length + (event.key === "ArrowRight" ? 1 : -1)) % tabs.length;
+      tabs[next].click();
+      tabs[next].focus();
+    };
+  };
   K.debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 })(window.Komute);

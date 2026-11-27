@@ -22,9 +22,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
-<link href="css/styles.css?v=7" rel="stylesheet">
+<link href="css/styles.css?v=9" rel="stylesheet">
 </head>
 <body data-view="plan">
 <a class="visually-hidden-focusable k-skip" href="#main" data-i18n="a11y.skip">Skip to content</a>
@@ -51,87 +50,80 @@
   </div>
 </header>
 
-<main id="main" class="container py-3">
+<main id="main" class="container py-3" tabindex="-1">
 
 <!-- ============ PLAN ============ -->
 <section id="view-plan">
-  <p class="k-tagline" data-i18n="home.tagline">Quezon City commute helper</p>
-  <h1 class="k-title mb-3" data-i18n="home.title">Know how to get there before you go</h1>
-
-  <div id="welcome" class="k-welcome mb-3">
-    <div class="d-flex justify-content-between align-items-start gap-2">
-      <strong data-i18n="welcome.title">New here? It takes 3 steps.</strong>
-      <button id="btnWelcomeClose" type="button" class="btn-close" data-i18n-aria="welcome.hide" aria-label="Hide this tip"></button>
+  <div class="k-plan-width">
+    <div class="k-plan-heading">
+      <h1 class="k-title" data-i18n="home.title">Plan your trip</h1>
+      <p data-i18n="home.serviceArea">Public transit in Quezon City</p>
     </div>
-    <ol class="mb-1"><li data-i18n="welcome.s1">Say where you are starting.</li><li data-i18n="welcome.s2">Say where you are going.</li><li data-i18n="welcome.s3">Press “Get my commute guide”.</li></ol>
-    <div class="d-flex flex-wrap gap-2 align-items-center"><button type="button" class="btn btn-primary btn-sm" data-tour-start><i class="bi bi-play-circle"></i> <span data-i18n="welcome.tour">Show me around</span></button>
-    <a href="#guide" class="small" data-i18n="welcome.more">Read the full guide</a></div>
-  </div>
-
-  <div class="row g-3 g-lg-4">
-    <div class="col-lg-5">
-      <div class="k-card k-form">
-        <!-- Trip box: A and B like Google Maps -->
+    <form id="tripForm" class="k-card k-form" tabindex="-1">
         <div class="k-trip">
-          <div class="k-trip-rail" aria-hidden="true"><span class="k-dotmini a"></span><span class="k-trip-line"></span><span class="k-dotmini b"></span></div>
           <div class="k-trip-fields">
-            <label class="k-label" for="origin"><span class="k-step">1</span> <span data-i18n="home.from">Where are you starting?</span></label>
+            <label class="k-label" for="origin"><span class="k-dotmini a" aria-hidden="true"></span><span data-i18n="home.startLabel">Starting point</span></label>
             <div class="k-field">
               <input id="origin" class="form-control form-control-lg" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.fromPh" placeholder="Type a barangay, street, or place">
               <button id="btnClearOrigin" class="k-ib-sm" type="button" data-i18n-aria="home.clear" aria-label="Clear"><i class="bi bi-x-circle-fill"></i></button>
               <button id="btnStarOrigin" class="k-ib-sm" type="button" data-i18n-aria="save.this" aria-label="Save this place"><i class="bi bi-star"></i></button>
             </div>
-            <div class="k-tools">
-              <button id="btnLocate" type="button" class="k-tool"><i class="bi bi-crosshair"></i><span data-i18n="home.myLoc">My location</span></button>
-              <button id="btnSearchStart" type="button" class="k-tool"><i class="bi bi-search"></i><span data-i18n="home.search">Search</span></button>
-              <button id="btnPinStart" type="button" class="k-tool" aria-pressed="false"><i class="bi bi-pin-map-fill"></i><span data-i18n="home.pin">Pin on map</span></button>
-              <button id="btnPickStart" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
-            </div>
-            <div id="quickStart" class="k-chips"></div>
-            <div id="originSuggestions" class="list-group k-sugglist" aria-live="polite"></div>
-
             <button id="btnSwapHome" type="button" class="k-swap" data-i18n-aria="home.swap" aria-label="Swap start and destination"><i class="bi bi-arrow-down-up"></i></button>
 
-            <label class="k-label mt-3" for="destination"><span class="k-step">2</span> <span data-i18n="home.to">Where are you going?</span></label>
+            <label class="k-label" for="destination"><span class="k-dotmini b" aria-hidden="true"></span><span data-i18n="home.destLabel">Destination</span></label>
             <div class="k-field">
               <input id="destination" class="form-control form-control-lg" autocomplete="off" enterkeyhint="search" data-i18n-ph="home.toPh" placeholder="Example: SM North EDSA">
               <button id="btnClearDest" class="k-ib-sm" type="button" data-i18n-aria="home.clear" aria-label="Clear"><i class="bi bi-x-circle-fill"></i></button>
               <button id="btnStarDest" class="k-ib-sm" type="button" data-i18n-aria="save.this" aria-label="Save this place"><i class="bi bi-star"></i></button>
             </div>
-            <div class="k-tools">
-              <button id="btnSearch" type="button" class="k-tool k-tool-main"><i class="bi bi-search"></i><span data-i18n="home.search">Search</span></button>
-              <button id="btnPin" type="button" class="k-tool" aria-pressed="false"><i class="bi bi-pin-map-fill"></i><span data-i18n="home.pin">Pin on map</span></button>
-              <button id="btnPickDest" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
-            </div>
-            <div id="quick" class="k-chips"></div>
-            <div id="suggestions" class="list-group k-sugglist" aria-live="polite"></div>
           </div>
         </div>
-        <div id="placeStatus" class="k-hint" role="status" aria-live="polite"></div>
-
-        <div id="recentWrap" class="d-none mt-3">
-          <div class="d-flex justify-content-between align-items-center"><span class="small fw-semibold" data-i18n="home.recent">Recent trips</span>
-            <button id="btnClearRecent" type="button" class="btn btn-link btn-sm p-0" data-i18n="home.clearRecent">Clear</button></div>
-          <div id="recentTrips" class="k-recents"></div>
+        <div class="k-plan-places">
+          <button id="btnLocate" type="button" class="k-locate"><i class="bi bi-crosshair" aria-hidden="true"></i><span data-i18n="home.myLoc">Use current location</span></button>
+          <div id="placeStatus" class="k-hint" role="status"></div>
+          <div id="originSuggestions" class="list-group k-sugglist" aria-label="Starting point suggestions" data-i18n-aria="home.startSuggestions"></div>
+          <div id="suggestions" class="list-group k-sugglist" aria-label="Destination suggestions" data-i18n-aria="home.destSuggestions"></div>
+          <div id="popularPlaces">
+            <h2 class="k-popular-title" id="popularTitle"></h2>
+            <div id="popularPlaceList" class="list-group"></div>
+          </div>
+          <div id="originTools" class="k-tools">
+            <button id="btnPinStart" type="button" class="k-tool" aria-pressed="false"><i class="bi bi-pin-map-fill"></i><span data-i18n="home.pin">Pin on map</span></button>
+            <button id="btnPickStart" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
+          </div>
+          <div id="destinationTools" class="k-tools d-none">
+            <button id="btnPin" type="button" class="k-tool" aria-pressed="false"><i class="bi bi-pin-map-fill"></i><span data-i18n="home.pin">Pin on map</span></button>
+            <button id="btnPickDest" type="button" class="k-tool"><i class="bi bi-list-stars"></i><span data-i18n="home.choose">Saved &amp; landmarks</span></button>
+          </div>
         </div>
 
-        <hr>
-        <div class="k-label"><span class="k-step">3</span> <span data-i18n="home.style">Choose your style</span></div>
+        <div class="k-findbar">
+          <button id="btnFind" class="btn btn-primary btn-lg w-100" type="submit" disabled><span data-i18n="home.find">Continue</span> <i class="bi bi-arrow-right" aria-hidden="true"></i></button>
+          <div class="k-hint text-center" id="findHint"></div>
+          <div id="upgradeBar" class="k-upgrade d-none"><span id="upgradeText"></span>
+            <button type="button" id="upgradeBtn" class="btn btn-sm btn-warning rounded-pill fw-bold"><i class="bi bi-star-fill"></i> <span id="upgradeLabel">Go unlimited</span></button></div>
+        </div>
+
+    </form>
+    <details id="recentWrap" class="k-disclosure d-none">
+      <summary><i class="bi bi-clock-history" aria-hidden="true"></i><span data-i18n="home.recent">Recent trips</span></summary>
+      <div class="k-disclosure-body">
+          <div id="recentTrips" class="k-recents"></div>
+          <button id="btnClearRecent" type="button" class="btn btn-link btn-sm px-0" data-i18n="home.clearRecent">Clear</button>
+      </div>
+    </details>
+
+    <details id="planOptions" class="k-disclosure">
+      <summary><i class="bi bi-sliders" aria-hidden="true"></i><span data-i18n="home.options">Trip preferences</span></summary>
+      <div class="k-disclosure-body">
         <div class="form-check form-switch k-switch">
           <input class="form-check-input" type="checkbox" role="switch" id="newCommuter" checked>
           <label class="form-check-label" for="newCommuter"><strong data-i18n="home.newMode">New commuter mode</strong>
             <span class="d-block small text-muted" data-i18n="home.newModeSub">Adds simple tips: how to spot the right jeepney, where to ask for help, and what to double-check.</span></label>
         </div>
-        <div class="k-findbar">
-          <button id="btnFind" class="btn btn-primary btn-lg w-100" type="button" disabled><i class="bi bi-compass"></i> <span data-i18n="home.find">Get my commute guide</span></button>
-          <div class="k-hint text-center" id="findHint"></div>
-          <div id="upgradeBar" class="k-upgrade d-none"><span id="upgradeText"></span>
-            <button type="button" id="upgradeBtn" class="btn btn-sm btn-warning rounded-pill fw-bold"><i class="bi bi-star-fill"></i> <span id="upgradeLabel">Go unlimited</span></button></div>
-        </div>
-        <div id="farePreview"></div>
       </div>
-    </div>
-    <div class="col-lg-7">
+    </details>
+    <div id="planPinPanel" class="d-none">
       <div id="planMapWrap" class="k-mapwrap">
         <div id="planMap" class="k-map" data-i18n-aria="map.qc" aria-label="Map of Quezon City"></div>
         <div id="pinOverlay" class="k-centerpin d-none" aria-hidden="true"><svg viewBox="0 0 32 42"><path d="M16 1C7.7 1 1 7.6 1 15.8 1 27 16 41 16 41s15-14 15-25.2C31 7.6 24.3 1 16 1z" fill="currentColor" stroke="#fff" stroke-width="2"/><circle cx="16" cy="16" r="6" fill="#fff"/></svg><span class="k-centerpin-shadow"></span></div>
@@ -152,9 +144,9 @@
           <div><span class="k-legend-dot" style="background:#2563eb"></span><span data-i18n="pt.train">Train station</span></div>
           <div class="k-legend-err small text-danger d-none" data-i18n="legend.err">Could not load terminals right now.</div>
         </div>
-        <div id="pinBar" class="k-pinbar d-none" role="dialog" aria-live="polite">
+        <div id="pinBar" class="k-pinbar d-none" role="dialog" aria-labelledby="pinBarTitle" aria-describedby="pinBarText">
           <div class="fw-semibold" id="pinBarTitle"></div>
-          <div class="small text-muted text-truncate" id="pinBarText"></div>
+          <div class="small text-muted text-truncate" id="pinBarText" role="status"></div>
           <div class="d-flex gap-2 mt-2">
             <button id="btnPinUse" type="button" class="btn btn-primary flex-grow-1"><i class="bi bi-check2-circle"></i> <span data-i18n="pin.use">Use this spot</span></button>
             <button id="btnPinCancel" type="button" class="btn btn-outline-secondary" data-i18n="pin.cancel">Cancel</button>
@@ -163,14 +155,20 @@
       </div>
       <p id="mapHint" class="k-hint" data-i18n="map.hint">Drag or pinch the map. Twist with two fingers to rotate; the compass button turns it back to north.</p>
     </div>
+    <div id="welcome" class="mt-3 d-flex align-items-center justify-content-between gap-2">
+      <button type="button" class="btn btn-outline-primary btn-sm" data-tour-start><i class="bi bi-play-circle" aria-hidden="true"></i> <span data-i18n="welcome.tour">Show me around</span></button>
+      <button id="btnWelcomeClose" type="button" class="btn-close" data-i18n-aria="welcome.hide" aria-label="Hide this tip"></button>
+    </div>
   </div>
 </section>
 
 <!-- ============ RESULTS ============ -->
 <section id="view-results" class="d-none">
   <div class="k-tripview">
-    <div class="k-nav-map">
-      <div id="tripMap" class="k-map-full" data-i18n-aria="map.trip" aria-label="Trip map"></div>
+    <section class="k-nav-map" id="tripMapSection" aria-label="Trip map" data-i18n-aria="map.trip" tabindex="-1">
+      <div id="tripMap" class="k-map-full" data-i18n-aria="map.trip" aria-label="Trip map">
+        <div class="k-map-fallback" role="status"><p data-i18n="map.loading">Loading map…</p></div>
+      </div>
       <div class="k-ftop">
         <button id="btnBack" class="k-ib" type="button" data-i18n-aria="res.back" aria-label="Back to planner"><i class="bi bi-arrow-left"></i></button>
         <div class="k-ftop-rows">
@@ -179,11 +177,23 @@
         </div>
         <button id="btnSwap" class="k-ib" type="button" data-i18n-aria="home.swap" aria-label="Swap start and destination"><i class="bi bi-arrow-down-up"></i></button>
       </div>
-      <div class="k-mapbtns k-mapbtns-trip">
+      <div class="k-trip-mapbar">
+      <details class="k-map-fare">
+        <summary><i class="bi bi-cash-coin" aria-hidden="true"></i> <span data-i18n="map.fare">Fare estimate</span>
+          <strong id="mapFareValue" aria-live="polite"></strong><i class="bi bi-chevron-down" aria-hidden="true"></i></summary>
+        <div id="resultsFare"></div>
+      </details>
+      <button id="btnViewRoutes" type="button" class="k-map-jump d-lg-none"><i class="bi bi-list-ul" aria-hidden="true"></i><span data-i18n="res.viewRoutes">Routes</span></button>
+      </div>
+      <p id="mapRouteNote" class="k-map-route-note d-none" data-i18n="map.routeApprox">Approximate paths between stops</p>
+      <details id="tripMapOptions" class="k-mapbtns-trip d-none">
+        <summary class="k-fab-sm" data-i18n-aria="map.options" aria-label="Map options"><i class="bi bi-layers" aria-hidden="true"></i></summary>
+        <div class="k-map-option-menu">
         <button id="tripCompass" type="button" class="k-fab-sm k-compass" data-i18n-aria="map.compass" aria-label="Compass"><span class="k-needle"></span></button>
         <button id="tripStyleBtn" type="button" class="k-fab-sm"><i class="bi bi-layers-fill"></i></button>
         <button id="tripTransitBtn" type="button" class="k-fab-sm" aria-pressed="false" data-i18n-aria="map.transit" aria-label="Show train and EDSA Carousel stations"><i class="bi bi-bus-front-fill"></i></button>
-      </div>
+        </div>
+      </details>
 <div class="k-legend k-legend-trip d-none" aria-label="Legend">
           <div class="fw-bold small mb-1" data-i18n="legend.title">Transit map</div>
           <div><span class="k-legend-dot" style="background:#1d4ed8"></span><span data-i18n="pt.terminal">Bus terminal</span></div>
@@ -195,21 +205,27 @@
           <div><span class="k-legend-dot" style="background:#2563eb"></span><span data-i18n="pt.train">Train station</span></div>
           <div class="k-legend-err small text-danger d-none" data-i18n="legend.err">Could not load terminals right now.</div>
         </div>
-      <button id="btnMyLoc" class="k-fab" type="button" data-i18n-aria="res.myLoc" aria-label="Show my location"><i class="bi bi-crosshair"></i></button>
-    </div>
-    <div class="k-nav-sheet" id="navSheet">
-      <button type="button" class="k-grab" id="btnGrab" data-i18n-aria="res.sheet" aria-label="Show more map"></button>
-      <div class="k-tabs" role="tablist">
-        <button class="k-tab" role="tab" data-mode="commute" aria-selected="true" type="button"><i class="bi bi-train-front"></i><span data-i18n="tab.commute">Commute</span></button>
-        <button class="k-tab" role="tab" data-mode="walk" aria-selected="false" type="button"><i class="bi bi-person-walking"></i><span id="t-walk">…</span></button>
-        <button class="k-tab" role="tab" data-mode="drive" aria-selected="false" type="button"><i class="bi bi-car-front"></i><span id="t-drive">…</span></button>
-        <button class="k-tab" role="tab" data-mode="bike" aria-selected="false" type="button"><i class="bi bi-bicycle"></i><span id="t-bike">…</span></button>
+      <button id="btnMyLoc" class="k-fab d-none" type="button" data-i18n-aria="res.myLoc" aria-label="Show my location"><i class="bi bi-crosshair"></i></button>
+    </section>
+    <section class="k-nav-sheet" id="navSheet" aria-labelledby="routeHeading" tabindex="-1">
+      <div class="k-sheet-heading">
+        <h1 id="routeHeading" tabindex="-1" data-i18n="res.routesHeading">Your routes</h1>
+        <button id="btnViewMap" type="button" class="k-text-action d-lg-none"><i class="bi bi-map" aria-hidden="true"></i><span data-i18n="res.viewMap">Map</span></button>
       </div>
-      <div id="panel-route" class="d-none"></div>
-      <div id="panel-commute" class="pt-3">
-        <div id="dirCompass" class="mb-3"></div>
+      <div id="travelModes" class="k-tabs" role="tablist" data-i18n-aria="res.travelMode" aria-label="Travel mode">
+        <button id="tabCommute" class="k-tab" role="tab" data-mode="commute" aria-controls="panel-commute" aria-selected="true" type="button"><i class="bi bi-train-front" aria-hidden="true"></i><span data-i18n="tab.commute">Commute</span></button>
+        <button id="tabWalk" class="k-tab" role="tab" data-mode="walk" aria-controls="panel-route" aria-selected="false" tabindex="-1" type="button"><i class="bi bi-person-walking" aria-hidden="true"></i><span data-i18n="tab.walk">Walk</span><small id="t-walk"></small></button>
+        <button id="tabDrive" class="k-tab" role="tab" data-mode="drive" aria-controls="panel-route" aria-selected="false" tabindex="-1" type="button"><i class="bi bi-car-front" aria-hidden="true"></i><span data-i18n="tab.drive">Drive</span><small id="t-drive"></small></button>
+        <button id="tabBike" class="k-tab" role="tab" data-mode="bike" aria-controls="panel-route" aria-selected="false" tabindex="-1" type="button"><i class="bi bi-bicycle" aria-hidden="true"></i><span data-i18n="tab.bike">Bike</span><small id="t-bike"></small></button>
+      </div>
+      <div id="panel-route" class="d-none" role="tabpanel" tabindex="0"></div>
+      <div id="panel-commute" class="pt-3" role="tabpanel" aria-labelledby="tabCommute" tabindex="0">
         <p id="groundNote" class="small text-muted mb-2"></p>
         <div id="planBody"></div>
+        <details id="routeExtras" class="k-disclosure">
+          <summary><i class="bi bi-three-dots" aria-hidden="true"></i><span data-i18n="res.tripDetails">Trip tools and tips</span></summary>
+          <div class="k-disclosure-body">
+        <div id="dirCompass"></div>
         <div id="planTools" class="d-flex flex-wrap gap-2 mt-3 d-none">
           <button id="btnSharePlan" class="btn btn-outline-primary rounded-pill" type="button"><i class="bi bi-share"></i> <span data-i18n="res.share">Share this plan</span></button>
           <button id="btnAgain" class="btn btn-outline-primary rounded-pill" type="button"><i class="bi bi-arrow-repeat"></i> <span data-i18n="res.again">Make another plan</span></button>
@@ -222,46 +238,45 @@
         </div>
         <div id="planSources" class="mt-3"></div>
         <div id="busesBox" class="mt-3"></div>
-        <div id="resultsFare" class="mt-3"></div>
         <div class="k-card mt-3"><h2 class="h5"><i class="bi bi-check2-square"></i> <span data-i18n="ride.title">Before you ride</span></h2>
           <ul class="k-check mb-0"><li data-i18n="ride.c1">Check the vehicle’s route sign matches your plan.</li><li data-i18n="ride.c2">Ask the driver or conductor for the current fare.</li>
           <li data-i18n="ride.c3">Carry small bills or coins.</li><li data-i18n="ride.c4">Tell someone your route if the trip is new to you.</li></ul></div>
-        <div class="alert k-warn small mt-3" role="note" data-i18n="res.aiWarn">This guide is AI-made. Routes, fares, and schedules may have changed. Always verify locally.</div>
+        <div class="alert k-warn small mt-3" role="note" data-i18n="res.aiWarn">Routes, fares, and schedules may have changed. Always verify locally.</div>
         <button type="button" class="btn btn-link p-0 small" data-fb-open="plan"><i class="bi bi-chat-square-text"></i> <span data-i18n="fb.report">Something wrong with this route? Tell us</span></button>
+          </div>
+        </details>
       </div>
-    </div>
+    </section>
   </div>
 </section>
 
 <!-- ============ SAVED / GUIDE / FARES ============ -->
-<section id="view-saved" class="d-none">
+<section id="view-saved" class="k-reference-view d-none">
   <h1 class="k-title h2" data-i18n="saved.title">Saved places</h1>
-  <p class="text-muted" data-i18n="saved.sub">Choose Start or Destination to use a place. To add a place, tap the ☆ star next to a box on the Plan screen.</p>
-  <div id="savedList" class="list-group k-saved"></div>
+  <p class="text-muted" data-i18n="saved.sub">Open a place to use it in your trip.</p>
+  <div id="savedList" class="k-saved"></div>
 </section>
 
-<section id="view-guide" class="d-none">
+<section id="view-guide" class="k-reference-view d-none">
   <h1 class="k-title h2" data-i18n="guide.title">Commuter guide</h1>
   <p class="text-muted" data-i18n="guide.sub">Tap a topic to open it. Start with “How to use Komute”.</p>
-  <div class="k-card k-tourcard mb-3 d-flex flex-wrap align-items-center gap-3">
-    <span class="k-icon"><i class="bi bi-signpost-split"></i></span>
+  <div class="k-card mb-3 d-flex flex-wrap align-items-center gap-3">
     <div class="flex-grow-1"><strong data-i18n="guide.tourTitle">New to Komute?</strong>
       <div class="small text-muted" data-i18n="guide.tourText">Take the step-by-step guide: how to plan a trip and how to read your commute guide.</div></div>
-    <button type="button" class="btn btn-primary" data-tour-start><i class="bi bi-play-circle"></i> <span data-i18n="guide.tourBtn">Show me around</span></button>
+    <button type="button" class="btn btn-outline-primary" data-tour-start><i class="bi bi-play-circle" aria-hidden="true"></i> <span data-i18n="guide.tourBtn">Show me around</span></button>
   </div>
   <div id="guideList" class="accordion k-guide"></div>
   <div class="k-card k-fbcard mt-3">
     <div><strong data-i18n="fb.cardTitle">Help us improve Komute</strong>
       <div class="small text-muted" data-i18n="fb.cardSub">Wrong route? Missing place? Idea? Send feedback. It takes 30 seconds.</div></div>
-    <button type="button" class="btn btn-primary rounded-pill" data-fb-open="idea"><i class="bi bi-chat-heart"></i> <span data-i18n="fb.send">Send feedback</span></button>
+    <button type="button" class="btn btn-outline-primary" data-fb-open="idea"><i class="bi bi-chat-heart" aria-hidden="true"></i> <span data-i18n="fb.send">Send feedback</span></button>
   </div>
-  <div class="k-lockup" aria-label="Komute"><img src="assets/logo-icon.png" alt="" width="64" height="64"><div><b>Komute</b><i class="k-bars"><u></u><u></u><u></u></i></div></div>
   <div class="d-flex align-items-center gap-2 mt-3 small text-muted"><img src="assets/qcu-seal.webp" alt="Quezon City University seal" width="40" height="40"> <span>A Quezon City University student project.</span></div>
 </section>
 
-<section id="view-fares" class="d-none">
+<section id="view-fares" class="k-reference-view d-none">
   <h1 class="k-title h2" data-i18n="fares.title">Fares</h1>
-  <p class="text-muted" data-i18n="fares.sub">Published rates for jeepneys, buses, trains, and other rides. Use them as a guide, then confirm before you ride.</p>
+  <p class="text-muted" data-i18n="fares.sub">Open a section to check fares, routes, or discounts.</p>
   <div id="fareList"></div>
 </section>
 </main>
@@ -367,7 +382,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 <script src="js/config.js"></script>
 <script src="js/lib/core.js"></script>
 <script src="js/i18n.js"></script>
@@ -403,7 +417,7 @@
 <script src="js/app.js"></script>
 <script>
 /* Tells the Android app when a touch starts on the map, a list or a text box, so pull-to-refresh never steals those drags. */
-document.addEventListener("touchstart", function (e) { try { if (window.KomuteBridge) KomuteBridge.noPull(!!(e.target && e.target.closest && e.target.closest(".maplibregl-map,.k-map,.k-sugglist,.k-cats,input,textarea,select,.modal,.k-navui"))); } catch (_) {} }, { passive: true, capture: true });
+document.addEventListener("touchstart", function (e) { try { if (window.KomuteBridge) KomuteBridge.noPull(!!(e.target && e.target.closest && e.target.closest(".k-map,.k-map-full,.k-sugglist,.k-cats,input,textarea,select,.modal,.k-navui"))); } catch (_) {} }, { passive: true, capture: true });
 </script>
 </body>
 </html>

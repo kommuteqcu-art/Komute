@@ -80,7 +80,7 @@
 
   // input: the text box; list: the dropdown container; opts.onPick(item) is called with { name, label, location|null, placeId?, lookup? }
   function attach(input, list, opts) {
-    let items = [], active = -1, seq = 0, timer = 0, session = Math.random().toString(36).slice(2);
+    let items = [], active = -1, seq = 0, timer = 0, pickSeq = 0, session = Math.random().toString(36).slice(2);
     input.setAttribute("role", "combobox");
     input.setAttribute("aria-autocomplete", "list");
     input.setAttribute("aria-expanded", "false");
@@ -101,7 +101,6 @@
         (loading ? `<div class="list-group-item k-sugg-loading"><span class="spinner-border spinner-border-sm"></span> ${K.esc(K.t("ta.loading"))}</div>` : "") +
         (!loading && raw.trim().length >= 2 ? `<div class="list-group-item k-sugg-foot"><i class="bi bi-pin-map"></i> ${K.esc(K.t("ta.notFound"))}</div>` : "");
       input.setAttribute("aria-expanded", "true");
-      document.body.classList.add("k-typing"); // list is open: the main button stays put
       list.querySelectorAll("button[data-i]").forEach((b) => {
         // Pick on click only: a finger that starts a scroll never produces a click, so the list can be scrolled.
         // mousedown is cancelled so a mouse click does not take focus away from the box first.
@@ -114,11 +113,21 @@
       });
     }
 
-    function close() { list.innerHTML = ""; items = []; active = -1; if (document.activeElement !== input) document.body.classList.remove("k-typing"); input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); }
+    function close() {
+      seq++;
+      clearTimeout(timer);
+      list.innerHTML = "";
+      items = [];
+      active = -1;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    }
 
     async function pick(i) {
       const it = items[i];
       if (!it) return;
+      const revision = ++pickSeq;
+      const value = input.value;
       close();
       input.blur();
       let item = it;
@@ -134,7 +143,7 @@
           else if (it.fallback) item = { ...it, location: it.fallback, approx: true };
         }
       } catch { /* keep text only */ }
-      opts.onPick(item);
+      if (revision === pickSeq && input.value === value) opts.onPick(item);
     }
 
     async function update(force) {
@@ -167,18 +176,9 @@
       }, force ? 0 : 220);
     }
 
-    input.addEventListener("input", () => update(false));
+    input.addEventListener("input", () => { pickSeq++; update(false); });
     input.addEventListener("focus", () => {
-      // On phones, move the box to the top so the list is not hidden by the keyboard or the big button
-      document.body.classList.add("k-typing");
-      if (window.innerWidth < 992) {
-        setTimeout(() => {
-          const header = document.querySelector(".k-header");
-          const y = input.getBoundingClientRect().top + window.scrollY - (header ? header.offsetHeight : 0) - 44;
-          window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
-        }, 60);
-      }
-      if (input.value.trim()) update(false);
+      if (input.value.trim() && opts.searchOnFocus?.() !== false) update(false);
     });
     let touching = false, touchT = 0;
     list.addEventListener("touchstart", () => { touching = true; clearTimeout(touchT); }, { passive: true });
@@ -186,15 +186,20 @@
     input.addEventListener("blur", () => setTimeout(() => {
       if (touching) return; // the finger is on the list (scrolling): keep it open
       if (document.activeElement === input) return; // focus came back (e.g. the Search button) - keep the list
-      close(); document.body.classList.remove("k-typing");
+      if (list.contains(document.activeElement)) return;
+      close();
     }, 200));
+    list.addEventListener("focusout", (e) => {
+      if (!list.contains(e.relatedTarget) && e.relatedTarget !== input) close();
+    });
     input.addEventListener("keydown", (e) => {
       const n = items.length;
       if (e.key === "ArrowDown" && n) { e.preventDefault(); active = (active + 1) % n; render(input.value, false); }
       else if (e.key === "ArrowUp" && n) { e.preventDefault(); active = (active - 1 + n) % n; render(input.value, false); }
       else if (e.key === "Enter") {
         e.preventDefault();
-        if (n) pick(active >= 0 ? active : 0); else update(true);
+        if (n) pick(active >= 0 ? active : 0);
+        else if (!opts.submitWhenReady?.()) update(true);
       } else if (e.key === "Escape") close();
       if (active >= 0) input.setAttribute("aria-activedescendant", `${list.id}-o${active}`);
     });

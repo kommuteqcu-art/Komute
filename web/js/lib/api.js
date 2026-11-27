@@ -87,27 +87,95 @@
 
   // Map tap or GPS position -> readable address. Returns { label, inArea } (inArea null = unknown).
   async function reverseGeocode(lat, lng) {
+    const pinnedLabel = `${K.t("place.pinned")} (${lat.toFixed(5)}, ${lng.toFixed(5)}), Quezon City`;
     try {
       const r = await post("/api/reverse", { latitude: lat, longitude: lng });
-      if (r && r.label) return r;
+      return { ...r, label: r.label || pinnedLabel };
     } catch { /* try OpenStreetMap directly */ }
     try {
       const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat}&lon=${lng}`;
-      const data = await (await fetch(url, { headers: { Accept: "application/json" } })).json();
+      const data = await (await fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(4000) })).json();
       if (data && data.display_name) return { label: data.display_name, inArea: /quezon city/i.test(data.display_name) };
     } catch { /* use the fallback below */ }
-    return { label: `${K.t("place.pinned")} (${lat.toFixed(5)}, ${lng.toFixed(5)}), Quezon City`, inArea: K.maps.inQC({ latitude: lat, longitude: lng }) ? null : false };
+    return { label: pinnedLabel, inArea: K.maps.inQC({ latitude: lat, longitude: lng }) ? null : false };
   }
 
-  // OSRM road routes. profile: drive | walk | bike
   const PROFILES = { drive: "routed-car", walk: "routed-foot", bike: "routed-bike" };
+  const junctionWait = { drive: [5, 10], walk: [6, 12], bike: [4, 8] };
+  const manilaClock = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Manila", weekday: "short", hour: "2-digit", hourCycle: "h23"
+  });
+
+  // Add a rough allowance for intersections where trips may stop for cross traffic.
+  function withJunctionDelays(route, profile, departure) {
+    const { weekday, hour } = Object.fromEntries(manilaClock.formatToParts(departure).map(({ type, value }) => [type, value]));
+    const h = Number(hour);
+    const busier = weekday !== "Sat" && weekday !== "Sun" && ((h >= 7 && h < 10) || (h >= 16 && h < 20));
+    const seen = new Set();
+    let delay = 0;
+    for (const { steps } of route.legs) {
+      for (const step of steps) {
+        (step.intersections || []).forEach((junction, index) => {
+          if ((index === 0 && step.maneuver.type === "depart") || step.maneuver.type === "arrive") return;
+          const branches = junction.bearings?.length || 0;
+          if (branches < 3 || !junction.location) return;
+          const key = junction.location.join(",");
+          if (seen.has(key)) return;
+          seen.add(key);
+          delay += junctionWait[profile][branches >= 4 ? 1 : 0];
+        });
+      }
+    }
+    return { ...route, duration: route.duration + Math.round(delay * (busier ? 1.5 : 1)),
+      trafficEstimate: seen.size ? "junctions" : "unavailable" };
+  }
+
+  async function drivingWithTraffic(a, b, alternatives) {
+    const latLng = (p) => ({ lat: p.latitude, lng: p.longitude });
+    const coordinate = (p) => [p.lng, p.lat];
+    await K.maps.load();
+    if (!K.maps.supported()) return [];
+    const { Route } = await google.maps.importLibrary("routes");
+    const { routes = [], fallbackInfo } = await Route.computeRoutes({
+      origin: latLng(a), destination: latLng(b), travelMode: "DRIVING", routingPreference: "TRAFFIC_AWARE",
+      computeAlternativeRoutes: alternatives, polylineQuality: "HIGH_QUALITY", language: K.lang === "tl" ? "fil" : "en",
+      fields: ["path", "legs", "distanceMeters", "durationMillis", "warnings"]
+    });
+    if (fallbackInfo && fallbackInfo.routingMode !== "TRAFFIC_AWARE") return [];
+
+    return routes.flatMap((route) => {
+      if (!Number.isFinite(route.durationMillis) || !Number.isFinite(route.distanceMeters) || !(route.path?.length >= 2)) return [];
+      const coordinates = route.path.map(coordinate);
+      const steps = (route.legs || []).flatMap((leg) => leg.steps || []).flatMap((step, i) => {
+        const point = step.path?.[0];
+        if (!point) return [];
+        const maneuver = (step.maneuver || "").toLowerCase().replace(/_/g, " ");
+        const modifier = /(?:slight |sharp )?(?:left|right)|straight|uturn/.exec(maneuver)?.[0];
+        const instructions = (step.instructions || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+        return [{ instructions, distance: step.distanceMeters || 0, maneuver: {
+          type: i === 0 ? "depart" : maneuver.includes("roundabout") ? "roundabout" : "turn", modifier, location: coordinate(point)
+        } }];
+      });
+      if (!steps.length) return [];
+      steps.push({ distance: 0, maneuver: { type: "arrive", location: coordinates[coordinates.length - 1] } });
+      return [{ geometry: { type: "LineString", coordinates }, legs: [{ steps }],
+        duration: route.durationMillis / 1000, distance: route.distanceMeters, warnings: route.warnings,
+        trafficEstimate: "google" }];
+    }).sort((x, y) => x.duration - y.duration);
+  }
+
   async function roadRoutes(profile, a, b, alternatives = true) {
+    const departure = new Date();
+    if (profile === "drive") {
+      const traffic = await drivingWithTraffic(a, b, alternatives).catch(() => []);
+      if (traffic.length) return traffic;
+    }
     const url = `${ROUTER}/${PROFILES[profile]}/route/v1/driving/${a.longitude},${a.latitude};${b.longitude},${b.latitude}` +
       `?overview=full&geometries=geojson&steps=true&alternatives=${alternatives}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
     const data = await res.json();
-    if (!data.routes || !data.routes.length) throw new Error("no route");
-    return data.routes;
+    if (!res.ok || !data.routes?.length) throw new Error("no route");
+    return data.routes.map((route) => withJunctionDelays(route, profile, departure)).sort((x, y) => x.duration - y.duration);
   }
 
   async function feedback(payload) { return post("/api/feedback", payload); }

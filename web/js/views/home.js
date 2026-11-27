@@ -5,8 +5,10 @@
   const S = K.state;
   const $ = (id) => document.getElementById(id);
   let km = null, taOrigin = null, taDest = null, pinTarget = null, pinLookup = null, pickTarget = "destination", pickModal, saveModal, saveTarget;
+  let activeField = "origin";
+  let originRevision = 0;
 
-  function init() {
+  function initMap() {
     km = K.maps.create("planMap", { draggable: true });
     if (km) {
       km.bindCompass($("planCompass"));
@@ -20,17 +22,30 @@
       km.onPinDrag(onPinDrag);
       km.ready(syncMarkers);
       $("planExpandBtn").onclick = () => setExpanded(!document.body.classList.contains("k-mapfull"));
-    } else {
-      ["btnPin", "btnPinStart", "planStyleBtn", "planCompass", "planExpandBtn", "planTransitBtn"].forEach((id) => $(id) && $(id).classList.add("d-none"));
     }
+  }
+
+  function init() {
     // Search as you type
-    taOrigin = K.typeahead.attach($("origin"), $("originSuggestions"), { onPick: (it) => pickSuggestion("origin", it) });
-    taDest = K.typeahead.attach($("destination"), $("suggestions"), { onPick: (it) => pickSuggestion("destination", it), near: () => S.originPoint });
+    $("origin").addEventListener("focus", () => selectField("origin"));
+    $("destination").addEventListener("focus", () => selectField("destination"));
+    taOrigin = K.typeahead.attach($("origin"), $("originSuggestions"), {
+      onPick: (it) => pickSuggestion("origin", it), searchOnFocus: () => !S.originPoint
+    });
+    taDest = K.typeahead.attach($("destination"), $("suggestions"), {
+      onPick: (it) => pickSuggestion("destination", it), near: () => S.originPoint, searchOnFocus: () => !S.destinationPoint,
+      submitWhenReady: () => {
+        if (!S.destinationPoint || $("btnFind").disabled) return false;
+        $("tripForm").requestSubmit();
+        return true;
+      }
+    });
     pickModal = new bootstrap.Modal($("pickModal"));
     saveModal = new bootstrap.Modal($("saveModal"));
 
     $("origin").value = S.origin;
     $("origin").addEventListener("input", (e) => {
+      originRevision++;
       S.origin = e.target.value;
       if (S.originPoint && S.originPoint.label !== S.origin) S.originPoint = null;
       syncMarkers(false); updateFind();
@@ -44,8 +59,6 @@
     $("btnClearOrigin").onclick = () => { setText("origin", ""); $("origin").focus(); };
     $("btnClearDest").onclick = () => { setText("destination", ""); $("destination").focus(); };
     $("btnSwapHome").onclick = swap;
-    $("btnSearchStart").onclick = () => search("origin");
-    $("btnSearch").onclick = () => search("destination");
     $("btnLocate").onclick = locate;
     $("btnPinStart").onclick = () => startPin("origin");
     $("btnPin").onclick = () => startPin("destination");
@@ -54,20 +67,35 @@
     $("btnStarOrigin").onclick = () => openSave("origin");
     $("btnStarDest").onclick = () => openSave("destination");
     $("btnPinUse").onclick = usePin;
-    $("btnPinCancel").onclick = stopPin;
+    $("btnPinCancel").onclick = () => stopPin();
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !pinTarget) return;
+      event.preventDefault();
+      stopPin();
+    });
     $("btnSaveConfirm").onclick = confirmSave;
     $("newCommuter").checked = S.newCommuterMode;
     $("newCommuter").onchange = (e) => { S.newCommuterMode = e.target.checked; K.store.set("newCommuter", S.newCommuterMode); };
-    $("btnFind").onclick = () => K.app.findRoutes();
+    $("tripForm").onsubmit = (event) => {
+      event.preventDefault();
+      if (!$("btnFind").disabled) K.app.findRoutes();
+    };
     $("btnClearRecent").onclick = () => { K.recent.clear(); renderRecent(); };
-    renderQuick();
+    selectField(S.origin ? "destination" : "origin");
     renderRecent();
     updateFind();
   }
 
   // ---------- helpers ----------
   const inputId = (t) => (t === "origin" ? "origin" : "destination");
-  const listId = (t) => (t === "origin" ? "originSuggestions" : "suggestions");
+
+  function selectField(target) {
+    activeField = target;
+    if (target === "origin") taDest.close(); else taOrigin.close();
+    $("originTools").classList.toggle("d-none", target !== "origin");
+    $("destinationTools").classList.toggle("d-none", target !== "destination");
+    renderQuick();
+  }
 
   function status(text, isError) {
     const el = $("placeStatus");
@@ -76,50 +104,43 @@
   }
 
   function updateFind() {
-    const ready = !!S.destination.trim() && !!S.origin.trim();
+    const ready = !!S.destination.trim() && !!S.origin.trim() && !$("btnLocate").disabled;
     $("btnFind").disabled = !ready;
-    $("findHint").textContent = K.t(!S.origin.trim() ? "home.hintNeedStart" : !S.destination.trim() ? "home.hintNeedDest" : "home.hintReady");
+    $("findHint").textContent = !S.origin.trim() ? K.t("home.hintNeedStart") : !S.destination.trim() ? K.t("home.hintNeedDest") : "";
+    $("popularPlaces").classList.toggle("d-none", !!(S.originPoint && S.destinationPoint));
     $("btnClearOrigin").classList.toggle("invisible", !S.origin);
     $("btnClearDest").classList.toggle("invisible", !S.destination);
   }
 
   function syncMarkers(fit = true) { if (km) km.setEndpoints(S.originPoint, S.destinationPoint, { fit }); }
-  function refreshFare() { K.fareEstimate.update($("farePreview")); }
 
   function setText(target, text) {
-    if (target === "origin") { S.origin = text; S.originPoint = null; } else { S.destination = text; S.destinationPoint = null; }
+    if (target === "origin") { originRevision++; S.origin = text; S.originPoint = null; } else { S.destination = text; S.destinationPoint = null; }
     $(inputId(target)).value = text;
-    $(listId(target)).innerHTML = "";
-    syncMarkers(false); updateFind(); refreshFare();
+    (target === "origin" ? taOrigin : taDest).close();
+    syncMarkers(false); updateFind();
   }
 
   // point = { latitude, longitude, label(full address) }
   function setPoint(target, point, label) {
     const text = label || K.fmt.shortLabel(point.label);
     const p = { latitude: point.latitude, longitude: point.longitude, label: text };
-    if (target === "origin") { S.origin = text; S.originPoint = p; } else { S.destination = text; S.destinationPoint = p; }
+    if (target === "origin") { originRevision++; S.origin = text; S.originPoint = p; } else { S.destination = text; S.destinationPoint = p; }
     S.road = null;
     $(inputId(target)).value = text;
-    $(listId(target)).innerHTML = "";
-    syncMarkers(); updateFind(); refreshFare();
+    (target === "origin" ? taOrigin : taDest).close();
+    syncMarkers(); updateFind();
+    if (target === "origin" && !S.destination.trim()) selectField("destination");
   }
 
   function swap() {
+    originRevision++;
+    taOrigin.close(); taDest.close();
     [S.origin, S.destination] = [S.destination, S.origin];
     [S.originPoint, S.destinationPoint] = [S.destinationPoint, S.originPoint];
     $("origin").value = S.origin; $("destination").value = S.destination;
     S.road = null;
-    syncMarkers(); updateFind(); refreshFare();
-  }
-
-  // ---------- search ----------
-  // The Search button opens the suggestion list right away (suggestions also appear while typing).
-  function search(target) {
-    const q = (target === "origin" ? S.origin : S.destination).trim();
-    if (!q) { status(K.t(target === "origin" ? "home.typeStart" : "home.typeDest")); $(inputId(target)).focus(); return; }
-    status("");
-    $(inputId(target)).focus();
-    (target === "origin" ? taOrigin : taDest).search();
+    syncMarkers(); updateFind();
   }
 
   function pickSuggestion(target, it) {
@@ -132,7 +153,6 @@
       setText(target, it.display || it.label || it.name);
       status(K.t("ta.noSpot"), true);
     }
-    if (target === "origin" && !S.destination.trim()) setTimeout(() => $("destination").focus(), 50);
   }
 
   // ---------- tap the map: "Start here" / "Go here" ----------
@@ -200,22 +220,36 @@
   // ---------- my location ----------
   async function locate() {
     if (!K.gps.available()) { status(K.t("home.noGeo"), true); return; }
+    const revision = ++originRevision;
+    taOrigin.close(); taDest.close();
     status(K.t("home.locating"));
     $("btnLocate").disabled = true;
+    updateFind();
     try {
       const pos = await K.gps.once();
-      const { label, inArea } = await K.api.reverseGeocode(pos.latitude, pos.longitude);
-      if (inArea === false) { status(K.t("home.youOutside"), true); return; }
-      setPoint("origin", { ...pos, label }, K.t("place.myLocation") + " · " + K.fmt.shortLabel(label));
+      if (revision !== originRevision || K.app.currentView() !== "plan") return;
+      if (!K.maps.inQC(pos)) { status(K.t("home.youOutside"), true); return; }
+      setPoint("origin", pos, K.t("home.currentLocation"));
       status(K.t("home.startIsYou"));
     } catch {
-      status(K.t("home.geoDenied"), true);
-    } finally { $("btnLocate").disabled = false; }
+      if (revision === originRevision) status(K.t("home.geoDenied"), true);
+    } finally { $("btnLocate").disabled = false; updateFind(); }
   }
 
   // ---------- pin on map (center pin) ----------
-  function startPin(target) {
-    if (!km) return;
+  async function startPin(target) {
+    if (!km) {
+      const buttons = [$("btnPinStart"), $("btnPin")];
+      buttons.forEach((button) => { button.disabled = true; });
+      status(K.t("map.loading"));
+      await K.maps.load();
+      buttons.forEach((button) => { button.disabled = false; });
+      if (K.app.currentView() !== "plan") { status(""); return; }
+      initMap();
+      if (!km) { status(K.t("map.unsupported"), true); return; }
+      status("");
+    }
+    $("planPinPanel").classList.remove("d-none");
     pinTarget = target;
     pinLookup = null;
     const p = target === "origin" ? S.originPoint : S.destinationPoint;
@@ -228,16 +262,20 @@
     $("btnPinStart").setAttribute("aria-pressed", String(target === "origin"));
     $("btnPin").setAttribute("aria-pressed", String(target === "destination"));
     if (window.innerWidth < 992) setExpanded(true); else $("planMapWrap").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("btnPinUse").focus({ preventScroll: true });
     previewPin();
   }
 
-  function stopPin() {
+  function stopPin(restoreFocus = true) {
+    const trigger = pinTarget === "origin" ? $("btnPinStart") : $("btnPin");
     pinTarget = null;
     $("pinOverlay").className = "k-centerpin d-none";
     $("pinBar").classList.add("d-none");
     $("btnPinStart").setAttribute("aria-pressed", "false");
     $("btnPin").setAttribute("aria-pressed", "false");
     if (document.body.classList.contains("k-mapfull")) setExpanded(false);
+    $("planPinPanel").classList.add("d-none");
+    if (restoreFocus) trigger.focus({ preventScroll: true });
   }
 
   async function previewPin() {
@@ -258,9 +296,11 @@
     const c = km.map.getCenter(), key = c.lat.toFixed(5) + "," + c.lng.toFixed(5);
     let r = pinLookup && pinLookup.key === key ? pinLookup : null;
     if (!r) { $("pinBarText").textContent = K.t("pin.finding"); r = await K.api.reverseGeocode(c.lat, c.lng); }
+    if (pinTarget !== target || K.app.currentView() !== "plan") return;
     if (r.inArea === false || !K.maps.inQC({ latitude: c.lat, longitude: c.lng })) { $("pinBarText").textContent = K.t("pin.outside"); return; }
-    stopPin();
+    stopPin(false);
     setPoint(target, { latitude: c.lat, longitude: c.lng, label: r.label });
+    ($("btnFind").disabled ? $("tripForm") : $("btnFind")).focus({ preventScroll: true });
     status(K.t(target === "origin" ? "pin.startSet" : "pin.destSet"));
   }
 
@@ -335,13 +375,19 @@
 
   // ---------- quick picks and recent trips ----------
   function renderQuick() {
-    const chips = (target) => K.places.all().slice(0, 4).map((p, i) =>
-      `<button type="button" class="k-chip" data-i="${i}" data-t="${target}"><i class="bi bi-star"></i> ${K.esc(K.places.label(p))}</button>`).join("");
-    $("quickStart").innerHTML = chips("origin");
-    $("quick").innerHTML = chips("destination");
-    document.querySelectorAll("#quickStart button, #quick button").forEach((b) => {
-      b.onclick = () => usePlace(b.dataset.t, K.places.all()[Number(b.dataset.i)]);
-    });
+    const target = activeField;
+    const list = $("popularPlaceList");
+    $("popularTitle").textContent = K.t(target === "origin" ? "home.startSuggestions" : "home.destSuggestions");
+    const saved = K.places.all().filter((place) => !place.builtIn).slice(0, 3);
+    const landmarks = K.data().landmarks.slice(0, 3 - saved.length);
+    const places = [
+      ...saved.map((p) => ({ name: K.places.label(p), sub: p.address, icon: "bi-star", pick: () => usePlace(target, p) })),
+      ...landmarks.map((p) => ({ name: p.name, sub: p.area, icon: "bi-geo-alt",
+        pick: () => pickSuggestion(target, { name: p.name, location: { latitude: p.lat, longitude: p.lng } }) }))
+    ];
+    list.innerHTML = places.map((p) => `<button type="button" class="list-group-item list-group-item-action k-sugg">
+      <i class="bi ${p.icon}" aria-hidden="true"></i><span><b>${K.esc(p.name)}</b><small>${K.esc(p.sub)}</small></span></button>`).join("");
+    list.querySelectorAll("button").forEach((button, i) => { button.onclick = places[i].pick; });
   }
 
   function renderRecent() {
@@ -353,7 +399,7 @@
       const t = trips[Number(b.dataset.i)];
       Object.assign(S, { origin: t.origin, originPoint: t.originPoint, destination: t.destination, destinationPoint: t.destinationPoint, road: null });
       $("origin").value = S.origin; $("destination").value = S.destination;
-      syncMarkers(); updateFind(); refreshFare();
+      syncMarkers(); updateFind();
       K.app.findRoutes();
     });
   }
@@ -365,10 +411,10 @@
   function show() {
     setTimeout(() => km && km.resize(), 60);
     $("origin").value = S.origin; $("destination").value = S.destination;
-    renderRecent(); renderQuick(); updateFind(); syncMarkers(false);
+    renderRecent(); selectField(S.origin ? "destination" : "origin"); updateFind(); syncMarkers(false);
   }
 
-  function relabel() { updateFind(); renderRecent(); renderQuick(); if (km) km.labelStyle($("planStyleBtn")); if (S.destination) refreshFare(); }
+  function relabel() { updateFind(); renderRecent(); renderQuick(); if (km) km.labelStyle($("planStyleBtn")); }
 
-  K.home = { init, show, useSavedPlace, useSavedStart, relabel };
+  K.home = { init, show, hide: () => { if (pinTarget) stopPin(false); }, useSavedPlace, useSavedStart, relabel };
 })(window.Komute);
